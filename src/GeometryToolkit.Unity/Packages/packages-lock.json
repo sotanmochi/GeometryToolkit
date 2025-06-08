@@ -210,28 +210,6 @@
       },
       "url": "https://packages.unity.com"
     },
-    "com.vrmc.gltf": {
-      "version": "https://github.com/vrm-c/UniVRM.git?path=/Assets/UniGLTF#v0.129.1",
-      "depth": 0,
-      "source": "git",
-      "dependencies": {
-        "com.unity.modules.animation": "1.0.0",
-        "com.unity.modules.imgui": "1.0.0",
-        "com.unity.modules.imageconversion": "1.0.0",
-        "com.unity.test-framework": "1.4.6"
-      },
-      "hash": "96a7b03851f96eb8953e0bb102c0dc09a2466588"
-    },
-    "com.vrmc.vrm": {
-      "version": "https://github.com/vrm-c/UniVRM.git?path=/Assets/VRM10#v0.129.1",
-      "depth": 0,
-      "source": "git",
-      "dependencies": {
-        "com.unity.timeline": "1.7.6",
-        "com.vrmc.gltf": "0.129.1"
-      },
-      "hash": "96a7b03851f96eb8953e0bb102c0dc09a2466588"
-    },
     "io.github.gkngkc.unity-standalone-file-browser": {
       "version": "https://github.com/sotanmochi/UnityStandaloneFileBrowser.git?path=Assets/StandaloneFileBrowser#1.2.3",
       "depth": 0,
