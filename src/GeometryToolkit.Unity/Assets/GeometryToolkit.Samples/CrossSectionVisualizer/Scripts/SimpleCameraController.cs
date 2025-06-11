@@ -6,7 +6,7 @@ namespace GeometryToolkit.Samples
     public sealed class SimpleCameraController : MonoBehaviour
     {
         [SerializeField] UnityEngine.Camera _camera;
-        [SerializeField] Vector3 _moveScaleFactor = new Vector3(0.1f, 0.1f, 0.1f);
+        [SerializeField] Vector3 _moveScaleFactor = new Vector3(0.05f, 0.05f, 0.05f);
         [SerializeField] float _rotationScaleFactor = 3.0f;
 
         void Awake()
