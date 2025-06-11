@@ -1,0 +1,89 @@
+<engine:UXML xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:engine="UnityEngine.UIElements" xmlns:editor="UnityEditor.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/GeometryToolkit.Samples/CrossSectionVisualizer/UI/CrossSectionVisualizerUI.uss?fileID=7433441132597879392&amp;guid=bf4d3cd0db98d45d58ed5c8b9b9f6509&amp;type=3#CrossSectionVisualizerUI" />
+
+    <!-- Left Panel -->
+    <engine:VisualElement name="app-control-panel" class="panel left-panel">
+        <engine:Label text="Cross Section Visualizer" class="header" />
+
+        <engine:VisualElement class="section">
+            <engine:Label text="VRM Model" class="section-header" />
+            <engine:VisualElement class="button-container">
+                <engine:VisualElement name="load-vrm-button" text="Load VRM" class="vrm-button">
+                    <engine:Label text="Load VRM" class="vrm-button-text" />
+                </engine:VisualElement>
+                <engine:VisualElement name="clear-vrm-button" class="vrm-button">
+                    <engine:Label text="Clear VRM" class="vrm-button-text" />
+                </engine:VisualElement>
+            </engine:VisualElement>
+        </engine:VisualElement>
+
+        <engine:VisualElement class="section">
+            <engine:Label text="Mesh Cutter Plane" class="section-header" />
+            <engine:Label text="Position" class="section-header" />
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="X:" />
+                <engine:Slider name="position-x-slider" low-value="-2" high-value="2" value="0" class="slider" />
+                <engine:Label name="position-x-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="Y:" />
+                <engine:Slider name="position-y-slider" low-value="0" high-value="2" value="0" class="slider" />
+                <engine:Label name="position-y-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="Z:" />
+                <engine:Slider name="position-z-slider" low-value="-2" high-value="2" value="0" class="slider" />
+                <engine:Label name="position-z-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:Label text="Rotation" class="section-header" />
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="X:" />
+                <engine:Slider name="rotation-x-slider" low-value="-180" high-value="180" value="0" class="slider" />
+                <engine:Label name="rotation-x-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="Y:" />
+                <engine:Slider name="rotation-y-slider" low-value="-180" high-value="180" value="0" class="slider" />
+                <engine:Label name="rotation-y-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:VisualElement class="slider-container">
+                <engine:Label text="Z:" />
+                <engine:Slider name="rotation-z-slider" low-value="-180" high-value="180" value="0" class="slider" />
+                <engine:Label name="rotation-z-value" text="0.00" class="slider-value" />
+            </engine:VisualElement>
+            <engine:Button name="reset-button" text="Reset to Default" class="section" />
+        </engine:VisualElement>
+    </engine:VisualElement>
+
+    <!-- Right Panel -->
+    <engine:VisualElement name="cross-section-list-panel" class="panel right-panel">
+        <engine:ScrollView name="cross-section-list" class="cross-section-list">
+            <!-- Sample items will be cleared by script at runtime -->
+            
+            <engine:VisualElement class="cross-section-item selected">
+                <engine:VisualElement class="cross-section-item-header">
+                    <engine:Toggle value="true" />
+                    <engine:Label text="Cross Section 1" class="cross-section-item-title" />
+                </engine:VisualElement>
+                <engine:Label text="Perimeter: 98.76 cm&#10;Area: 0.0187 m²" class="cross-section-item-info" />
+            </engine:VisualElement>
+            
+            <engine:VisualElement class="cross-section-item">
+                <engine:VisualElement class="cross-section-item-header">
+                    <engine:Toggle value="false" />
+                    <engine:Label text="Cross Section 2" class="cross-section-item-title" />
+                </engine:VisualElement>
+                <engine:Label text="Perimeter: 142.89 cm&#10;Area: 0.0312 m²" class="cross-section-item-info" />
+            </engine:VisualElement>
+            
+            <engine:VisualElement class="cross-section-item">
+                <engine:VisualElement class="cross-section-item-header">
+                    <engine:Toggle value="true" />
+                    <engine:Label text="Cross Section 3" class="cross-section-item-title" />
+                </engine:VisualElement>
+                <engine:Label text="Perimeter: 87.23 cm&#10;Area: 0.0156 m²" class="cross-section-item-info" />
+            </engine:VisualElement>
+
+        </engine:ScrollView>
+    </engine:VisualElement>
+</engine:UXML>
