@@ -41,7 +41,7 @@ namespace GeometryToolkit
 
         public void UpdatePerimeter()
         {
-            var isClosedLoop = _points.Count >= 3 && Vector3Utils.GetHashCode(_points[0]) == Vector3Utils.GetHashCode(_points[^1]);
+            var isClosedLoop = _points.Count > 3 && Vector3Utils.GetHashCode(_points[0]) == Vector3Utils.GetHashCode(_points[^1]);
             if (!isClosedLoop) return;
 
             var perimeter = 0f;
@@ -55,15 +55,20 @@ namespace GeometryToolkit
 
         public void UpdateSignedArea(Vector3 cuttingPlaneNormal)
         {
+            var isClosedLoop = _points.Count > 3 && Vector3Utils.GetHashCode(_points[0]) == Vector3Utils.GetHashCode(_points[^1]);
+            if (!isClosedLoop) return;
+
+            var pointCount = _points.Count - 1; // Exclude the last point as it is a duplicate of the first point.
+
             var centroid = Vector3.zero;
-            foreach (var point in _points)
+            for (var i = 0; i < pointCount; i++)
             {
-                centroid += point;
+                centroid += _points[i];
             }
-            centroid /= _points.Count;
+            centroid /= pointCount;
 
             var signedArea = 0f;
-            for (var i = 0; i < _points.Count - 1; i++)
+            for (var i = 0; i < pointCount; i++)
             {
                 var p1 = _points[i];
                 var p2 = _points[i + 1];

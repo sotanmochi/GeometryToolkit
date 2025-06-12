@@ -44,7 +44,16 @@ namespace GeometryToolkit
 
         public static CrossSection Generate(ContourLoop contour)
         {
-            var crossSection = new CrossSection(contour.Points.Count + 1, 3 * (contour.Points.Count - 1))
+            var isClosedLoop = contour.Points.Count > 3 && 
+                               Vector3Utils.GetHashCode(contour.Points[0]) == Vector3Utils.GetHashCode(contour.Points[^1]);
+            if (!isClosedLoop)
+            {
+                return new CrossSection();
+            }
+
+            var pointCount = contour.Points.Count - 1; // Exclude the last point as it is a duplicate of the first point.
+
+            var crossSection = new CrossSection(pointCount + 1, 3 * (pointCount - 1))
             {
                 Perimeter = contour.Perimeter,
                 SignedArea = contour.SignedArea
@@ -52,25 +61,27 @@ namespace GeometryToolkit
 
             // Calculate centroid
             var centroid = Vector3.zero;
-            for (var i = 0; i < contour.Points.Count; i++) // Avoid allocation caused by foreach loop.
+            for (var i = 0; i < pointCount; i++) // Avoid allocation caused by foreach loop.
             {
                 centroid += contour.Points[i];
             }
-            centroid /= contour.Points.Count;
+            centroid /= pointCount;
 
             // Set vertices
             crossSection.Centroid = centroid;
             crossSection.AddVertex(Vector3.zero); // Centroid
-            for (var i = 0; i < contour.Points.Count; i++) // Avoid allocation caused by foreach loop.
+            for (var i = 0; i < pointCount; i++) // Avoid allocation caused by foreach loop.
             {
                 var relativePosition = contour.Points[i] - centroid;
                 crossSection.AddVertex(relativePosition);
             }
 
             // Set indices
-            for (int i = 0; i < contour.Points.Count - 1; i++) // Avoid allocation caused by foreach loop.
+            var centroidIndex = 0; // The first vertex is the centroid.
+            for (var i = 1; i <= pointCount; i++) // Avoid allocation caused by foreach loop.
             {
-                crossSection.AddTriangle(0, i + 1, i + 2); // (Centroid, Current point, Next point)
+                var nextPoint = i % pointCount + 1; // The index of the first contour point is 1.
+                crossSection.AddTriangle(centroidIndex, i, nextPoint);
             }
 
             return crossSection;
