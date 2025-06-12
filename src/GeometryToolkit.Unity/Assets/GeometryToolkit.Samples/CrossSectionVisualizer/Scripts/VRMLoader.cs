@@ -73,12 +73,12 @@ namespace GeometryToolkit.Samples
 #endif
         }
 
-        private void LoadVrmModel(string path)
+        public void LoadVrmModel(string path)
         {
             LoadVrmModelAsync(path).Forget();
         }
 
-        private async UniTaskVoid LoadVrmModelAsync(string path)
+        public async UniTaskVoid LoadVrmModelAsync(string path)
         {
             byte[] bytes = null;
 

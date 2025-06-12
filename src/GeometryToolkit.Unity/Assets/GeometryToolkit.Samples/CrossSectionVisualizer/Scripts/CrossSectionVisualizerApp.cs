@@ -15,20 +15,22 @@ namespace GeometryToolkit.Samples
         private readonly List<MeshDataBuffer> _meshCutTargets = new();
         private readonly List<CrossSection> _currentCrossSections = new();
 
-        private Vector3 _planePosition = new Vector3(0, 1.02f, 0);
+        private Vector3 _planePosition = new Vector3(0, 1, 0);
         private Vector3 _planeEulerAngles = Vector3.zero;
 
         private void Start()
         {
-            InitializeMeshDataBuffers();
-            UpdateCrossSection();
-
             _vrmLoader.ModelLoaded += AddTargetObject;
             _vrmLoader.ClearButtonClicked += RemoveTargetObject;
             _meshCutterPlaneControlView.PlaneTransformChanged += OnPlaneTransformChanged;
             _crossSectionListView.VisibilityChanged += OnCrossSectionVisibilityChanged;
 
             _meshCutterPlaneControlView.SetDefaultPlaneTransform(_planePosition, _planeEulerAngles);
+
+            InitializeMeshDataBuffers();
+            UpdateCrossSection();
+
+            _vrmLoader.LoadVrmModel($"{Application.streamingAssetsPath}/VRM/AvatarSample_A.vrm");
         }
 
         private void OnDestroy()
