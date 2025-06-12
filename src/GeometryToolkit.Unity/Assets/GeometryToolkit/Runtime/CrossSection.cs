@@ -11,8 +11,18 @@ namespace GeometryToolkit
         public List<Vector3> Vertices => _vertices;
         public List<int> Triangles => _triangles;
         public Vector3 Centroid { get; private set; }
-        public float SignedArea { get; private set; }
+
+        /// <summary>
+        /// The perimeter length of the cross-section.
+        /// </summary>
         public float Perimeter { get; private set; }
+
+        /// <summary>
+        /// The signed area of the cross-section:
+        /// - A positive value indicates that the centroid lies on the back-face (inside) of the target mesh.
+        /// - A negative value indicates that the centroid lies on the front-face (outside) of the target mesh.
+        /// </summary>
+        public float SignedArea { get; private set; }
 
         private CrossSection(int vertexCapacity = 0, int triangleCapacity = 0)
         {
