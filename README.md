@@ -2,6 +2,8 @@
 
 GeometryToolkitはUnity向けのメッシュ処理ライブラリです。
 
+<img src="./docs/GeometryToolkit.png" width=640>
+
 ## Features
 **MeshCutter**: メッシュを平面で切断して交点と交線を取得します。
 
