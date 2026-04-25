@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 
 namespace GeometryToolkit.CameraFraming
@@ -7,21 +9,59 @@ namespace GeometryToolkit.CameraFraming
     /// Computes a camera world position that frames the given renderers within the requested
     /// screen-space margins, given a fixed camera orientation.
     ///
-    /// Algorithm: for the given camera orientation, build an
-    /// <see cref="ObjectBoundingFrustum"/> over the input vertices, evaluate the four frustum-plane
-    /// offsets (one per Normalized Device Coordinates (NDC) edge) for the requested bounds, then
-    /// compute the camera position directly from those offsets via fixed formulas (no iteration).
-    /// One axis tightly fits the requested margins; the other axis is slack and re-centered.
+    /// Algorithm: build an <see cref="ObjectBoundingFrustum"/> over the input vertices for the
+    /// given camera orientation, evaluate the four frustum-plane offsets (one per Normalized
+    /// Device Coordinates (NDC) edge) for the requested bounds, then compute the camera position
+    /// directly from those offsets via fixed formulas (no iteration). One axis tightly fits the
+    /// requested margins; the other axis is slack and re-centered.
+    ///
+    /// Vertex acquisition is delegated to an <see cref="IMeshVertexCollector"/> implementation
+    /// (default: <see cref="MeshVertexCollector"/> using zero-allocation CPU readback). Callers
+    /// can substitute <see cref="ComputeShaderMeshVertexCollector"/> for GPU-side collection on
+    /// compute-shader-capable hardware, or supply their own implementation.
     /// </summary>
-    public sealed class AutoFramingCamera
+    public sealed class AutoFramingCamera : IDisposable
     {
         private readonly ObjectBoundingFrustum _boundingFrustum = new();
+        private readonly IMeshVertexCollector _vertexCollector;
+        private readonly bool _ownsVertexCollector;
+        private NativeArray<Vector3> _worldVertexBuffer;
 
         public ObjectBoundingFrustum BoundingFrustum => _boundingFrustum;
+        public IMeshVertexCollector VertexCollector => _vertexCollector;
 
         /// <summary>
-        /// Compute the camera position that frames the renderers within the requested margins.
-        /// The camera's orientation is taken from <paramref name="camera"/> and is unchanged.
+        /// Creates an instance that owns and disposes a default <see cref="MeshVertexCollector"/>.
+        /// </summary>
+        public AutoFramingCamera() : this(new MeshVertexCollector(), ownsVertexCollector: true)
+        {
+        }
+
+        /// <summary>
+        /// Creates an instance using the supplied vertex collector. The caller retains ownership
+        /// and is responsible for disposing the collector unless <paramref name="ownsVertexCollector"/>
+        /// is true.
+        /// </summary>
+        public AutoFramingCamera(IMeshVertexCollector vertexCollector, bool ownsVertexCollector = false)
+        {
+            _vertexCollector = vertexCollector ?? throw new ArgumentNullException(nameof(vertexCollector));
+            _ownsVertexCollector = ownsVertexCollector;
+        }
+
+        /// <summary>
+        /// Release internal NativeArray and (optionally) the owned vertex collector.
+        /// </summary>
+        public void Dispose()
+        {
+            _boundingFrustum.Dispose();
+            if (_ownsVertexCollector) _vertexCollector.Dispose();
+            if (_worldVertexBuffer.IsCreated) _worldVertexBuffer.Dispose();
+        }
+
+        /// <summary>
+        /// Convenience overload: collects world-space vertices from the renderers using the
+        /// configured <see cref="IMeshVertexCollector"/>, then computes the camera position.
+        /// The reference point is set to the first renderer's transform position.
         /// </summary>
         public Vector3 ComputeCameraPosition(
             Camera camera,
@@ -30,11 +70,50 @@ namespace GeometryToolkit.CameraFraming
             int screenWidth,
             int screenHeight)
         {
-            if (camera == null) throw new System.ArgumentNullException(nameof(camera));
-            if (renderers == null) throw new System.ArgumentNullException(nameof(renderers));
-            if (renderers.Count == 0) throw new System.ArgumentException("renderers must not be empty.", nameof(renderers));
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            if (renderers == null) throw new ArgumentNullException(nameof(renderers));
+            if (renderers.Count == 0) throw new ArgumentException("renderers must not be empty.", nameof(renderers));
 
-            _boundingFrustum.Rebuild(renderers, camera);
+            int totalVertexCount = _vertexCollector.GetTotalVertexCount(renderers);
+            if (totalVertexCount == 0)
+            {
+                throw new InvalidOperationException(
+                    "No supported renderers found in the input list (no vertices to frame).");
+            }
+
+            EnsureWorldVertexBufferCapacity(totalVertexCount);
+            int written = _vertexCollector.WriteWorldVertices(renderers, _worldVertexBuffer);
+
+            var referencePoint = renderers[0] != null ? renderers[0].transform.position : Vector3.zero;
+
+            // Pass only the valid prefix (writes may stop short of capacity if some renderers were unsupported / null).
+            return ComputeCameraPosition(camera, _worldVertexBuffer.GetSubArray(0, written),
+                                         referencePoint, margin, screenWidth, screenHeight);
+        }
+
+        /// <summary>
+        /// Core overload: takes a pre-collected NativeArray of world-space vertices. Use this when
+        /// the caller wants to bypass the standard vertex collection (e.g. supply pre-baked convex
+        /// hull points, custom GPU-derived data, or vertices from a non-Renderer source).
+        /// If the caller's source buffer holds extra reserve capacity beyond the valid count,
+        /// pass a sub-array via <see cref="NativeArray{T}.GetSubArray"/>.
+        /// </summary>
+        public Vector3 ComputeCameraPosition(
+            Camera camera,
+            NativeArray<Vector3> worldVertices,
+            Vector3 referencePoint,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            if (worldVertices.Length == 0)
+            {
+                throw new ArgumentException("worldVertices must not be empty.", nameof(worldVertices));
+            }
+
+            var t = camera.transform;
+            _boundingFrustum.Rebuild(worldVertices, t.right, t.up, t.forward, referencePoint);
             return ComputeCameraPositionFromBoundingFrustum(camera, margin, screenWidth, screenHeight);
         }
 
@@ -46,7 +125,7 @@ namespace GeometryToolkit.CameraFraming
         public Vector3 ComputeCameraPositionFromBoundingFrustum(
             Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
         {
-            if (camera == null) throw new System.ArgumentNullException(nameof(camera));
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
 
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(screenWidth, screenHeight);
             float horizontalSpan = nRight - nLeft;
@@ -54,7 +133,7 @@ namespace GeometryToolkit.CameraFraming
             const float MinSpan = 1e-4f;
             if (horizontalSpan < MinSpan || verticalSpan < MinSpan)
             {
-                throw new System.ArgumentException(
+                throw new ArgumentException(
                     "ScreenMargin leaves no usable area; (nRight - nLeft) and (nTop - nBottom) must be positive.");
             }
 
@@ -90,6 +169,13 @@ namespace GeometryToolkit.CameraFraming
                    + _boundingFrustum.Right * pr
                    + _boundingFrustum.Up * pu
                    - _boundingFrustum.Forward * pf;
+        }
+
+        private void EnsureWorldVertexBufferCapacity(int requiredCapacity)
+        {
+            if (_worldVertexBuffer.IsCreated && _worldVertexBuffer.Length >= requiredCapacity) return;
+            if (_worldVertexBuffer.IsCreated) _worldVertexBuffer.Dispose();
+            _worldVertexBuffer = new NativeArray<Vector3>(requiredCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         }
 
         private static bool HorizontalIsTight(float pfHorizontal, float pfVertical)

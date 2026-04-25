@@ -26,5 +26,10 @@ namespace GeometryToolkit.Samples
             _camera.transform.position = _autoFraming.ComputeCameraPosition(
                 _camera, _renderers, margin, width, height);
         }
+
+        void OnDestroy()
+        {
+            _autoFraming.Dispose();
+        }
     }
 }
