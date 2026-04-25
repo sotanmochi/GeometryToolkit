@@ -27,6 +27,7 @@ namespace GeometryToolkit.CameraFraming
         private Vector3 _forward;
         private Vector3[] _projectedPoints;
         private int _projectedPointCount;
+        private Mesh _bakeMeshBuffer;
 
         /// <summary>
         /// Origin of the local (r, u, f) coordinate frame in which every input point is stored.
@@ -69,8 +70,10 @@ namespace GeometryToolkit.CameraFraming
         /// orientation basis. Subsequent <see cref="ComputeFrustumPlaneOffsets"/> calls reuse
         /// these projections without re-traversing the meshes.
         ///
-        /// Supports <see cref="MeshRenderer"/>; other renderer types (e.g.
-        /// <see cref="SkinnedMeshRenderer"/>) are silently skipped.
+        /// Supports both <see cref="MeshRenderer"/> (uses the shared mesh) and
+        /// <see cref="SkinnedMeshRenderer"/> (snapshots the current pose via
+        /// <see cref="SkinnedMeshRenderer.BakeMesh(Mesh, bool)"/> with <c>useScale: false</c>).
+        /// Other renderer types are silently skipped.
         /// </summary>
         public void Rebuild(IReadOnlyList<Renderer> renderers, Camera camera)
         {
@@ -85,9 +88,7 @@ namespace GeometryToolkit.CameraFraming
             int totalVertexCount = 0;
             for (int i = 0; i < renderers.Count; i++)
             {
-                var mesh = TryGetSharedMesh(renderers[i]);
-                if (mesh == null) continue;
-                totalVertexCount += mesh.vertexCount;
+                totalVertexCount += GetSourceVertexCount(renderers[i]);
             }
 
             if (_projectedPoints == null || _projectedPoints.Length < totalVertexCount)
@@ -99,7 +100,7 @@ namespace GeometryToolkit.CameraFraming
             for (int i = 0; i < renderers.Count; i++)
             {
                 var renderer = renderers[i];
-                var mesh = TryGetSharedMesh(renderer);
+                var mesh = ResolveMeshForCurrentPose(renderer);
                 if (mesh == null) continue;
 
                 var localToWorld = renderer.transform.localToWorldMatrix;
@@ -176,12 +177,39 @@ namespace GeometryToolkit.CameraFraming
             return (left, right, bottom, top);
         }
 
-        private static Mesh TryGetSharedMesh(Renderer renderer)
+        private static int GetSourceVertexCount(Renderer renderer)
+        {
+            if (renderer is MeshRenderer meshRenderer)
+            {
+                var sharedMesh = meshRenderer.GetComponent<MeshFilter>()?.sharedMesh;
+                return sharedMesh != null ? sharedMesh.vertexCount : 0;
+            }
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
+            {
+                var sharedMesh = skinnedMeshRenderer.sharedMesh;
+                return sharedMesh != null ? sharedMesh.vertexCount : 0;
+            }
+            return 0;
+        }
+
+        private Mesh ResolveMeshForCurrentPose(Renderer renderer)
         {
             if (renderer is MeshRenderer meshRenderer)
             {
                 var meshFilter = meshRenderer.GetComponent<MeshFilter>();
                 return meshFilter != null ? meshFilter.sharedMesh : null;
+            }
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer && skinnedMeshRenderer.sharedMesh != null)
+            {
+                if (_bakeMeshBuffer == null)
+                {
+                    _bakeMeshBuffer = new Mesh { name = "ObjectBoundingFrustum.BakeBuffer" };
+                    _bakeMeshBuffer.hideFlags = HideFlags.HideAndDontSave;
+                }
+                // useScale: false にすることで、後段で renderer.transform.localToWorldMatrix を
+                // 適用したときに scale が二重に適用されないようにする。
+                skinnedMeshRenderer.BakeMesh(_bakeMeshBuffer, useScale: false);
+                return _bakeMeshBuffer;
             }
             return null;
         }
