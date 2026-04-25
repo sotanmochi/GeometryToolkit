@@ -11,7 +11,7 @@ namespace GeometryToolkit.Samples
     {
         [SerializeField] private Camera _camera;
         [SerializeField] private Renderer[] _renderers;
-        [SerializeField, Range(0f, 0.4f)] private float _marginPercent = 0.1f;
+        [SerializeField, Range(0f, 40f)] private float _marginPercent = 10f;
 
         private readonly AutoFramingCamera _autoFraming = new();
 
@@ -19,7 +19,7 @@ namespace GeometryToolkit.Samples
         {
             if (_camera == null || _renderers == null || _renderers.Length == 0) return;
 
-            var margin = ScreenMargin.Uniform(_marginPercent, isPercentage: true);
+            var margin = ScreenMargin.Uniform(_marginPercent, ScreenMarginUnit.Percentage);
             int width = Mathf.Max(1, Screen.width);
             int height = Mathf.Max(1, Screen.height);
 

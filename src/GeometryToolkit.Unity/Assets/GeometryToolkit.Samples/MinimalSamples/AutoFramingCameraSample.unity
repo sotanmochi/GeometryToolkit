@@ -583,7 +583,7 @@ MonoBehaviour:
   - {fileID: 862033280}
   - {fileID: 2086066348}
   - {fileID: 1938970424}
-  _marginPercent: 0.1
+  _marginPercent: 10
 --- !u!4 &939899963
 Transform:
   m_ObjectHideFlags: 0

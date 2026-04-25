@@ -3,8 +3,19 @@ using System;
 namespace GeometryToolkit.CameraFraming
 {
     /// <summary>
-    /// Target screen-space margins for auto-framing. Each value is interpreted as either pixels or
-    /// a fraction of the screen size depending on <see cref="IsPercentage"/>.
+    /// Unit for interpreting <see cref="ScreenMargin"/> values.
+    /// </summary>
+    public enum ScreenMarginUnit
+    {
+        /// <summary>Margin as a percent (0-100) of the screen size on the corresponding axis.</summary>
+        Percentage,
+        /// <summary>Margin in pixels on the corresponding axis.</summary>
+        Pixels,
+    }
+
+    /// <summary>
+    /// Target screen-space margins for auto-framing. Each value is interpreted according to
+    /// <see cref="Unit"/>: a percent (0-100) of the screen size, or pixels.
     /// </summary>
     public readonly struct ScreenMargin : IEquatable<ScreenMargin>
     {
@@ -12,28 +23,34 @@ namespace GeometryToolkit.CameraFraming
         public readonly float Right;
         public readonly float Bottom;
         public readonly float Top;
-        public readonly bool IsPercentage;
+        public readonly ScreenMarginUnit Unit;
 
-        public ScreenMargin(float left, float right, float bottom, float top, bool isPercentage = false)
+        public ScreenMargin(float left, float right, float bottom, float top, ScreenMarginUnit unit)
         {
             Left = left;
             Right = right;
             Bottom = bottom;
             Top = top;
-            IsPercentage = isPercentage;
+            Unit = unit;
         }
 
-        public static ScreenMargin Pixels(float left, float right, float bottom, float top) =>
-            new(left, right, bottom, top, isPercentage: false);
-
+        /// <summary>
+        /// Margin as a percent (0-100) of the screen size on each side.
+        /// </summary>
         public static ScreenMargin Percentage(float left, float right, float bottom, float top) =>
-            new(left, right, bottom, top, isPercentage: true);
-
-        public static ScreenMargin Uniform(float allSides, bool isPercentage = false) =>
-            new(allSides, allSides, allSides, allSides, isPercentage);
+            new(left, right, bottom, top, ScreenMarginUnit.Percentage);
 
         /// <summary>
-        /// Convert margins to NDC bounds for the given screen size.
+        /// Margin in pixels on each side.
+        /// </summary>
+        public static ScreenMargin Pixels(float left, float right, float bottom, float top) =>
+            new(left, right, bottom, top, ScreenMarginUnit.Pixels);
+
+        public static ScreenMargin Uniform(float allSides, ScreenMarginUnit unit) =>
+            new(allSides, allSides, allSides, allSides, unit);
+
+        /// <summary>
+        /// Convert margins to Normalized Device Coordinates (NDC) bounds for the given screen size.
         /// </summary>
         /// <returns>n_l, n_r in [-1, 1] horizontally and n_b, n_t in [-1, 1] vertically.</returns>
         public (float nLeft, float nRight, float nBottom, float nTop) ToNdcBounds(int screenWidth, int screenHeight)
@@ -41,10 +58,24 @@ namespace GeometryToolkit.CameraFraming
             if (screenWidth <= 0) throw new ArgumentOutOfRangeException(nameof(screenWidth));
             if (screenHeight <= 0) throw new ArgumentOutOfRangeException(nameof(screenHeight));
 
-            float ml = IsPercentage ? Left * screenWidth : Left;
-            float mr = IsPercentage ? Right * screenWidth : Right;
-            float mb = IsPercentage ? Bottom * screenHeight : Bottom;
-            float mt = IsPercentage ? Top * screenHeight : Top;
+            float ml, mr, mb, mt;
+            switch (Unit)
+            {
+                case ScreenMarginUnit.Percentage:
+                    ml = Left * 0.01f * screenWidth;
+                    mr = Right * 0.01f * screenWidth;
+                    mb = Bottom * 0.01f * screenHeight;
+                    mt = Top * 0.01f * screenHeight;
+                    break;
+                case ScreenMarginUnit.Pixels:
+                    ml = Left;
+                    mr = Right;
+                    mb = Bottom;
+                    mt = Top;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException($"Unsupported {nameof(ScreenMarginUnit)}: {Unit}");
+            }
 
             return (
                 nLeft: 2f * ml / screenWidth - 1f,
@@ -56,10 +87,10 @@ namespace GeometryToolkit.CameraFraming
 
         public bool Equals(ScreenMargin other) =>
             Left == other.Left && Right == other.Right && Bottom == other.Bottom && Top == other.Top &&
-            IsPercentage == other.IsPercentage;
+            Unit == other.Unit;
 
         public override bool Equals(object obj) => obj is ScreenMargin other && Equals(other);
 
-        public override int GetHashCode() => HashCode.Combine(Left, Right, Bottom, Top, IsPercentage);
+        public override int GetHashCode() => HashCode.Combine(Left, Right, Bottom, Top, Unit);
     }
 }
