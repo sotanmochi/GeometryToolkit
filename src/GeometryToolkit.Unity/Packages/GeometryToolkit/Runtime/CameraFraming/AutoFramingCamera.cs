@@ -20,6 +20,15 @@ namespace GeometryToolkit.CameraFraming
     /// can substitute <see cref="ComputeShaderMeshVertexCollector"/> for GPU-side collection on
     /// compute-shader-capable hardware, or supply their own implementation.
     /// </summary>
+    /// <remarks>
+    /// The pipeline is exposed both as the convenience entry point
+    /// <see cref="ComputeCameraPosition(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>
+    /// (single call) and as the decomposed pair
+    /// <see cref="ComputeFrustumPlaneOffsets(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>
+    /// + <see cref="RecomposeCameraPosition(Camera, float, float, float, float, ScreenMargin, int, int)"/>.
+    /// The decomposed form lets callers operate on the four offsets between the two steps —
+    /// e.g. apply temporal smoothing for video-capture / live use cases.
+    /// </remarks>
     public sealed class AutoFramingCamera : IDisposable
     {
         private readonly ObjectBoundingFrustum _boundingFrustum = new();
@@ -70,25 +79,8 @@ namespace GeometryToolkit.CameraFraming
             int screenWidth,
             int screenHeight)
         {
-            if (camera == null) throw new ArgumentNullException(nameof(camera));
-            if (renderers == null) throw new ArgumentNullException(nameof(renderers));
-            if (renderers.Count == 0) throw new ArgumentException("renderers must not be empty.", nameof(renderers));
-
-            int totalVertexCount = _vertexCollector.GetTotalVertexCount(renderers);
-            if (totalVertexCount == 0)
-            {
-                throw new InvalidOperationException(
-                    "No supported renderers found in the input list (no vertices to frame).");
-            }
-
-            EnsureWorldVertexBufferCapacity(totalVertexCount);
-            int written = _vertexCollector.WriteWorldVertices(renderers, _worldVertexBuffer);
-
-            var referencePoint = renderers[0] != null ? renderers[0].transform.position : Vector3.zero;
-
-            // Pass only the valid prefix (writes may stop short of capacity if some renderers were unsupported / null).
-            return ComputeCameraPosition(camera, _worldVertexBuffer.GetSubArray(0, written),
-                                         referencePoint, margin, screenWidth, screenHeight);
+            BuildBoundingFrustum(camera, renderers);
+            return ComputeCameraPositionFromBoundingFrustum(camera, margin, screenWidth, screenHeight);
         }
 
         /// <summary>
@@ -126,7 +118,121 @@ namespace GeometryToolkit.CameraFraming
             Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
         {
             if (camera == null) throw new ArgumentNullException(nameof(camera));
+            var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
+            var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
+                p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical);
+            return RecomposeFromOffsets(in p, left, right, bottom, top);
+        }
 
+        /// <summary>
+        /// Build the internal <see cref="BoundingFrustum"/> from the given renderers, using the
+        /// configured <see cref="IMeshVertexCollector"/>. The bounding frustum is then available
+        /// via <see cref="BoundingFrustum"/> for subsequent offset / position queries.
+        /// </summary>
+        public void BuildBoundingFrustum(Camera camera, IReadOnlyList<Renderer> renderers)
+        {
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            if (renderers == null) throw new ArgumentNullException(nameof(renderers));
+            if (renderers.Count == 0) throw new ArgumentException("renderers must not be empty.", nameof(renderers));
+
+            int totalVertexCount = _vertexCollector.GetTotalVertexCount(renderers);
+            if (totalVertexCount == 0)
+            {
+                throw new InvalidOperationException(
+                    "No supported renderers found in the input list (no vertices to frame).");
+            }
+
+            EnsureWorldVertexBufferCapacity(totalVertexCount);
+            int written = _vertexCollector.WriteWorldVertices(renderers, _worldVertexBuffer);
+
+            var referencePoint = renderers[0] != null ? renderers[0].transform.position : Vector3.zero;
+            var t = camera.transform;
+            // Pass only the valid prefix (writes may stop short of capacity if some renderers were unsupported / null).
+            _boundingFrustum.Rebuild(_worldVertexBuffer.GetSubArray(0, written),
+                                     t.right, t.up, t.forward, referencePoint);
+        }
+
+        /// <summary>
+        /// Build the bounding frustum from the renderers and return the four frustum-plane
+        /// offsets (left / right / bottom / top) in the OBF's local (r, u, f) frame.
+        /// Use this entry when the caller wants to operate on the offsets between collection
+        /// and recomposition — e.g. apply per-axis temporal smoothing before deriving the
+        /// final camera position via <see cref="RecomposeCameraPosition"/>.
+        /// </summary>
+        public (float left, float right, float bottom, float top) ComputeFrustumPlaneOffsets(
+            Camera camera,
+            IReadOnlyList<Renderer> renderers,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            BuildBoundingFrustum(camera, renderers);
+            var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
+            return _boundingFrustum.ComputeFrustumPlaneOffsets(
+                p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical);
+        }
+
+        /// <summary>
+        /// Recompose the camera world position from arbitrary frustum-plane offsets, using the
+        /// currently cached <see cref="BoundingFrustum"/> basis (built by a prior
+        /// <see cref="BuildBoundingFrustum"/> / <see cref="ComputeFrustumPlaneOffsets"/> call).
+        /// Pass smoothed or otherwise post-processed offsets here to obtain the corresponding
+        /// camera position via the same closed-form formulas used by
+        /// <see cref="ComputeCameraPosition(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>.
+        /// </summary>
+        public Vector3 RecomposeCameraPosition(
+            Camera camera,
+            float left, float right, float bottom, float top,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
+            return RecomposeFromOffsets(in p, left, right, bottom, top);
+        }
+
+        private void EnsureWorldVertexBufferCapacity(int requiredCapacity)
+        {
+            if (_worldVertexBuffer.IsCreated && _worldVertexBuffer.Length >= requiredCapacity) return;
+            if (_worldVertexBuffer.IsCreated) _worldVertexBuffer.Dispose();
+            _worldVertexBuffer = new NativeArray<Vector3>(requiredCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        }
+
+        // Closed-form depth per axis (see ObjectBoundingFrustum.ComputeFrustumPlaneOffsets remarks
+        // for the touching-plane equations). The axis with the larger pf is the tight one — it
+        // anchors to its NDC edges; the other axis is recentered so the slack is shared.
+        private Vector3 RecomposeFromOffsets(in ProjectionParameters p,
+                                             float left, float right, float bottom, float top)
+        {
+            float pfHorizontal = (right - left) / (p.horizontalSpan * p.kHorizontal);
+            float pfVertical = (top - bottom) / (p.verticalSpan * p.kVertical);
+
+            // Take the more restrictive depth so neither axis overflows the requested margins.
+            float pf = Mathf.Max(pfHorizontal, pfVertical);
+
+            bool horizontalIsTight = pfHorizontal >= pfVertical;
+
+            float pr = horizontalIsTight
+                ? left - p.nLeft * p.kHorizontal * pf
+                : ((left - p.nLeft * p.kHorizontal * pf) + (right - p.nRight * p.kHorizontal * pf)) * 0.5f;
+
+            float pu = !horizontalIsTight
+                ? bottom - p.nBottom * p.kVertical * pf
+                : ((bottom - p.nBottom * p.kVertical * pf) + (top - p.nTop * p.kVertical * pf)) * 0.5f;
+
+            // Camera world position = reference + R * pr + U * pu - F * pf.
+            // The -F term places the camera "behind" the reference along the forward axis,
+            // so the bounded points lie in front of the camera (positive depth).
+            return _boundingFrustum.ReferencePoint
+                   + _boundingFrustum.Right * pr
+                   + _boundingFrustum.Up * pu
+                   - _boundingFrustum.Forward * pf;
+        }
+
+        private static ProjectionParameters ComputeProjectionParameters(
+            Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
+        {
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(screenWidth, screenHeight);
             float horizontalSpan = nRight - nLeft;
             float verticalSpan = nTop - nBottom;
@@ -141,44 +247,19 @@ namespace GeometryToolkit.CameraFraming
             float kVertical = Mathf.Tan(fovYRad * 0.5f);
             float kHorizontal = kVertical * camera.aspect;
 
-            var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
-                nLeft, nRight, nBottom, nTop, kHorizontal, kVertical);
-
-            // Closed-form depth per axis (see ObjectBoundingFrustum.ComputeFrustumPlaneOffsets
-            // remarks for the touching-plane equations).
-            float pfHorizontal = (right - left) / (horizontalSpan * kHorizontal);
-            float pfVertical = (top - bottom) / (verticalSpan * kVertical);
-
-            // Take the more restrictive depth so neither axis overflows the requested margins.
-            float pf = Mathf.Max(pfHorizontal, pfVertical);
-
-            // For the axis that became slack (smaller pf), recenter so the slack is shared
-            // between the two sides instead of pinning to one edge.
-            float pr = HorizontalIsTight(pfHorizontal, pfVertical)
-                ? left - nLeft * kHorizontal * pf
-                : ((left - nLeft * kHorizontal * pf) + (right - nRight * kHorizontal * pf)) * 0.5f;
-
-            float pu = !HorizontalIsTight(pfHorizontal, pfVertical)
-                ? bottom - nBottom * kVertical * pf
-                : ((bottom - nBottom * kVertical * pf) + (top - nTop * kVertical * pf)) * 0.5f;
-
-            // Camera world position = reference + R * pr + U * pu - F * pf.
-            // The -F term places the camera "behind" the reference along the forward axis,
-            // so the bounded points lie in front of the camera (positive depth).
-            return _boundingFrustum.ReferencePoint
-                   + _boundingFrustum.Right * pr
-                   + _boundingFrustum.Up * pu
-                   - _boundingFrustum.Forward * pf;
+            return new ProjectionParameters
+            {
+                nLeft = nLeft, nRight = nRight, nBottom = nBottom, nTop = nTop,
+                kHorizontal = kHorizontal, kVertical = kVertical,
+                horizontalSpan = horizontalSpan, verticalSpan = verticalSpan,
+            };
         }
 
-        private void EnsureWorldVertexBufferCapacity(int requiredCapacity)
+        private struct ProjectionParameters
         {
-            if (_worldVertexBuffer.IsCreated && _worldVertexBuffer.Length >= requiredCapacity) return;
-            if (_worldVertexBuffer.IsCreated) _worldVertexBuffer.Dispose();
-            _worldVertexBuffer = new NativeArray<Vector3>(requiredCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            public float nLeft, nRight, nBottom, nTop;
+            public float kHorizontal, kVertical;
+            public float horizontalSpan, verticalSpan;
         }
-
-        private static bool HorizontalIsTight(float pfHorizontal, float pfVertical)
-            => pfHorizontal >= pfVertical;
     }
 }
