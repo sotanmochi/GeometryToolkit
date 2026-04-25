@@ -8,8 +8,9 @@ namespace GeometryToolkit.CameraFraming
     /// screen-space margins, given a fixed camera orientation.
     ///
     /// Algorithm: for the given camera orientation, build an
-    /// <see cref="ObjectBoundingFrustum"/> over the input vertices, evaluate the four side
-    /// support values for the requested NDC bounds, then solve the closed-form camera position.
+    /// <see cref="ObjectBoundingFrustum"/> over the input vertices, evaluate the four frustum-plane
+    /// offsets (one per Normalized Device Coordinates (NDC) edge) for the requested bounds, then
+    /// compute the camera position directly from those offsets via fixed formulas (no iteration).
     /// One axis tightly fits the requested margins; the other axis is slack and re-centered.
     /// </summary>
     public sealed class AutoFramingCamera
@@ -61,14 +62,13 @@ namespace GeometryToolkit.CameraFraming
             float kVertical = Mathf.Tan(fovYRad * 0.5f);
             float kHorizontal = kVertical * camera.aspect;
 
-            var (a, b, c, d) = _boundingFrustum.ComputeSupportValues(
+            var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
                 nLeft, nRight, nBottom, nTop, kHorizontal, kVertical);
 
-            // Closed-form depth on each axis. Re-derived from the touching-plane equations
-            // (see ObjectBoundingFrustum.ComputeSupportValues comment); the design document
-            // listed these with flipped signs.
-            float pfHorizontal = (b - a) / (horizontalSpan * kHorizontal);
-            float pfVertical = (d - c) / (verticalSpan * kVertical);
+            // Closed-form depth per axis (see ObjectBoundingFrustum.ComputeFrustumPlaneOffsets
+            // remarks for the touching-plane equations).
+            float pfHorizontal = (right - left) / (horizontalSpan * kHorizontal);
+            float pfVertical = (top - bottom) / (verticalSpan * kVertical);
 
             // Take the more restrictive depth so neither axis overflows the requested margins.
             float pf = Mathf.Max(pfHorizontal, pfVertical);
@@ -76,12 +76,12 @@ namespace GeometryToolkit.CameraFraming
             // For the axis that became slack (smaller pf), recenter so the slack is shared
             // between the two sides instead of pinning to one edge.
             float pr = HorizontalIsTight(pfHorizontal, pfVertical)
-                ? a - nLeft * kHorizontal * pf
-                : ((a - nLeft * kHorizontal * pf) + (b - nRight * kHorizontal * pf)) * 0.5f;
+                ? left - nLeft * kHorizontal * pf
+                : ((left - nLeft * kHorizontal * pf) + (right - nRight * kHorizontal * pf)) * 0.5f;
 
             float pu = !HorizontalIsTight(pfHorizontal, pfVertical)
-                ? c - nBottom * kVertical * pf
-                : ((c - nBottom * kVertical * pf) + (d - nTop * kVertical * pf)) * 0.5f;
+                ? bottom - nBottom * kVertical * pf
+                : ((bottom - nBottom * kVertical * pf) + (top - nTop * kVertical * pf)) * 0.5f;
 
             // Camera world position = reference + R * pr + U * pu - F * pf.
             // The -F term places the camera "behind" the reference along the forward axis,
