@@ -1,3 +1,7 @@
+# Local only
+docs/CodeReviewRequests.md
+
 .DS_Store
 [Bb]uild/
 [Bb]uilds/
+.idea/
