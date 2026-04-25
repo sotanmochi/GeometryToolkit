@@ -22,6 +22,10 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField] private List<Renderer> _targets = new();
         [SerializeField, Range(0f, 40f)] private float _marginPercent = 10f;
 
+        [Header("Preset")]
+        [SerializeField, Tooltip("Selecting a preset writes its values into the One-Euro / Output Clamps fields below. Tweak afterward to fine-tune.")]
+        private FramingSmoothingPreset _preset = FramingSmoothingPreset.Standard;
+
         [Header("One-Euro Filter (Horizontal)")]
         [SerializeField, Min(0f)] private float _horizontalMinCutoff = 1f;
         [SerializeField, Min(0f)] private float _horizontalBeta = 0.007f;
@@ -44,18 +48,61 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField] private CollectorType _collectorType = CollectorType.Cpu;
         [SerializeField] private ComputeShader _computeShader;
 
+        [Header("Debug Visualization")]
+        [SerializeField, Tooltip("Show numeric overlay of raw / smoothed offsets and clamp state in the Game view.")]
+        private bool _showOnGuiOverlay = false;
+
+        [SerializeField, Tooltip("Show raw vs smoothed camera position trail in the Scene view.")]
+        private bool _showSceneTrail = false;
+
+        [SerializeField, Min(2), Tooltip("Number of trail samples kept in the ring buffer (~5s @ 60fps for 300).")]
+        private int _trailSampleCount = 300;
+
+        // Tracks the last preset value applied via OnValidate so individual field edits don't
+        // re-trigger preset application. Hidden because it's an implementation detail.
+        [SerializeField, HideInInspector] private FramingSmoothingPreset _appliedPreset = FramingSmoothingPreset.Standard;
+
         private AutoFramingCamera _autoFramingCamera;
         private FramingSmoother _smoother;
 
+        // Trail ring buffer (lazy-allocated when _showSceneTrail is enabled).
+        private Vector3[] _rawTrail;
+        private Vector3[] _smoothedTrail;
+        private int _trailCount;
+        private int _trailWriteIndex;
+
         public Camera Camera { get => _camera; set => _camera = value; }
         public IList<Renderer> Targets => _targets;
+        public FramingSmoother Smoother => _smoother;
 
         /// <summary>
         /// Discard internal filter state. Call after a discontinuous change in the framing
         /// target (e.g. target switch, scene teleport) so the next frame re-initializes
         /// from the new raw offsets without the speed-estimate carrying the artifact.
         /// </summary>
-        public void ResetSmoothing() => _smoother?.Reset();
+        public void ResetSmoothing()
+        {
+            _smoother?.Reset();
+            _trailCount = 0;
+            _trailWriteIndex = 0;
+        }
+
+        /// <summary>
+        /// Apply a parameter preset to the One-Euro / Output Clamps fields. Equivalent to
+        /// selecting the preset in the Inspector dropdown.
+        /// </summary>
+        public void ApplyPreset(FramingSmoothingPreset preset)
+        {
+            var values = FramingSmootherPresets.GetValues(preset);
+            _horizontalMinCutoff = values.HorizontalMinCutoff;
+            _verticalMinCutoff = values.VerticalMinCutoff;
+            _horizontalBeta = values.HorizontalBeta;
+            _verticalBeta = values.VerticalBeta;
+            _deadZone = values.DeadZone;
+            _maxLinearSpeed = float.IsPositiveInfinity(values.MaxLinearSpeed) ? 0f : values.MaxLinearSpeed;
+            _preset = preset;
+            _appliedPreset = preset;
+        }
 
         private void Awake()
         {
@@ -77,6 +124,17 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             _autoFramingCamera?.Dispose();
             _autoFramingCamera = null;
             _smoother = null;
+            _rawTrail = null;
+            _smoothedTrail = null;
+        }
+
+        private void OnValidate()
+        {
+            // Only apply preset values when the dropdown actually changed — leave manual tweaks alone.
+            if (_preset != _appliedPreset)
+            {
+                ApplyPreset(_preset);
+            }
         }
 
         private void Update()
@@ -110,8 +168,90 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             int width = Mathf.Max(1, _camera.pixelWidth > 0 ? _camera.pixelWidth : Screen.width);
             int height = Mathf.Max(1, _camera.pixelHeight > 0 ? _camera.pixelHeight : Screen.height);
 
-            _camera.transform.position = _smoother.ApplyAndRecompose(
+            Vector3 smoothedPosition = _smoother.ApplyAndRecompose(
                 _autoFramingCamera, _camera, _targets, margin, width, height, dt);
+            _camera.transform.position = smoothedPosition;
+
+            if (_showSceneTrail) PushTrailSample(_smoother.LastRawPosition, smoothedPosition);
+        }
+
+        private void PushTrailSample(Vector3 raw, Vector3 smoothed)
+        {
+            int capacity = Mathf.Max(2, _trailSampleCount);
+            if (_rawTrail == null || _rawTrail.Length != capacity)
+            {
+                _rawTrail = new Vector3[capacity];
+                _smoothedTrail = new Vector3[capacity];
+                _trailCount = 0;
+                _trailWriteIndex = 0;
+            }
+
+            _rawTrail[_trailWriteIndex] = raw;
+            _smoothedTrail[_trailWriteIndex] = smoothed;
+            _trailWriteIndex = (_trailWriteIndex + 1) % capacity;
+            if (_trailCount < capacity) _trailCount++;
+        }
+
+        private void OnGUI()
+        {
+            if (!_showOnGuiOverlay || _smoother == null || !_smoother.HasLastFrame) return;
+
+            var raw = _smoother.LastRawOffsets;
+            var smoothed = _smoother.LastSmoothedOffsets;
+            Vector3 rawPos = _smoother.LastRawPosition;
+            Vector3 smoothedPos = _smoother.LastSmoothedPosition;
+            float positionDelta = Vector3.Distance(rawPos, smoothedPos);
+
+            const int Pad = 8;
+            var style = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 12, richText = true };
+            string text =
+                $"<b>SmoothedFramingFollower</b>\n" +
+                $"preset:    {_preset}    dt: {Time.deltaTime * 1000f:F2} ms\n" +
+                $"  raw L/R/B/T:    {raw.left,7:F4} / {raw.right,7:F4} / {raw.bottom,7:F4} / {raw.top,7:F4}\n" +
+                $"  smooth L/R/B/T: {smoothed.left,7:F4} / {smoothed.right,7:F4} / {smoothed.bottom,7:F4} / {smoothed.top,7:F4}\n" +
+                $"  delta L/R/B/T:  {smoothed.left - raw.left,+7:F4} / {smoothed.right - raw.right,+7:F4} / {smoothed.bottom - raw.bottom,+7:F4} / {smoothed.top - raw.top,+7:F4}\n" +
+                $"raw      pos:  ({rawPos.x,7:F3}, {rawPos.y,7:F3}, {rawPos.z,7:F3})\n" +
+                $"smoothed pos:  ({smoothedPos.x,7:F3}, {smoothedPos.y,7:F3}, {smoothedPos.z,7:F3})    Δ = {positionDelta,6:F4} m\n" +
+                $"DeadZone hit:  {_smoother.LastDeadZoneHit}    MaxSpeed clamp hit: {_smoother.LastMaxSpeedHit}";
+
+            var rect = new Rect(Pad, Pad, 540, 130);
+            GUI.Box(rect, text, style);
+        }
+
+        private void OnDrawGizmos()
+        {
+            if (!_showSceneTrail || _trailCount < 2) return;
+
+            // Walk from oldest to newest, drawing each line strip.
+            int capacity = _rawTrail.Length;
+            int oldest = (_trailWriteIndex - _trailCount + capacity) % capacity;
+
+            Gizmos.color = new Color(1f, 0.85f, 0.15f, 0.85f); // raw — yellow
+            Vector3 prevRaw = _rawTrail[oldest];
+            Gizmos.color = new Color(0.25f, 1f, 0.5f, 0.85f);  // smoothed — green
+            Vector3 prevSmoothed = _smoothedTrail[oldest];
+
+            for (int i = 1; i < _trailCount; i++)
+            {
+                int idx = (oldest + i) % capacity;
+                Vector3 raw = _rawTrail[idx];
+                Vector3 smoothed = _smoothedTrail[idx];
+
+                Gizmos.color = new Color(1f, 0.85f, 0.15f, 0.85f);
+                Gizmos.DrawLine(prevRaw, raw);
+                Gizmos.color = new Color(0.25f, 1f, 0.5f, 0.85f);
+                Gizmos.DrawLine(prevSmoothed, smoothed);
+
+                prevRaw = raw;
+                prevSmoothed = smoothed;
+            }
+
+            // Mark the latest sample with small spheres.
+            int latestIdx = (_trailWriteIndex - 1 + capacity) % capacity;
+            Gizmos.color = new Color(1f, 0.85f, 0.15f);
+            Gizmos.DrawSphere(_rawTrail[latestIdx], 0.03f);
+            Gizmos.color = new Color(0.25f, 1f, 0.5f);
+            Gizmos.DrawSphere(_smoothedTrail[latestIdx], 0.03f);
         }
     }
 }

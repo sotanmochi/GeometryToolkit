@@ -56,6 +56,36 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         private bool _hasPreviousPosition;
         private Vector3 _previousPosition;
 
+        // Last-frame snapshots, exposed via properties for debug visualization.
+        private (float left, float right, float bottom, float top) _lastRawOffsets;
+        private (float left, float right, float bottom, float top) _lastSmoothedOffsets;
+        private Vector3 _lastRawPosition;
+        private Vector3 _lastSmoothedPosition;
+        private bool _lastDeadZoneHit;
+        private bool _lastMaxSpeedHit;
+        private bool _hasLastFrame;
+
+        /// <summary>True once <see cref="ApplyAndRecompose"/> has been called at least once.</summary>
+        public bool HasLastFrame => _hasLastFrame;
+
+        /// <summary>Raw frustum-plane offsets (pre-filter) from the most recent call.</summary>
+        public (float left, float right, float bottom, float top) LastRawOffsets => _lastRawOffsets;
+
+        /// <summary>Smoothed frustum-plane offsets (post-filter) from the most recent call.</summary>
+        public (float left, float right, float bottom, float top) LastSmoothedOffsets => _lastSmoothedOffsets;
+
+        /// <summary>Camera position recomposed from the raw offsets (no smoothing applied).</summary>
+        public Vector3 LastRawPosition => _lastRawPosition;
+
+        /// <summary>Final smoothed camera position returned to the caller (after dead-zone / max-speed clamps).</summary>
+        public Vector3 LastSmoothedPosition => _lastSmoothedPosition;
+
+        /// <summary>True if the most recent call hit the dead zone (held previous position).</summary>
+        public bool LastDeadZoneHit => _lastDeadZoneHit;
+
+        /// <summary>True if the most recent call hit the max-linear-speed clamp.</summary>
+        public bool LastMaxSpeedHit => _lastMaxSpeedHit;
+
         /// <summary>
         /// Build the bounding frustum, smooth the four offsets, and return the recomposed
         /// camera position with dead-zone and max-speed clamps applied.
@@ -86,17 +116,35 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             float sBottom = _bottomFilter.Filter(raw.bottom, dt);
             float sTop = _topFilter.Filter(raw.top, dt);
 
+            // Recompose the raw (unsmoothed) position too — used by debug visualization to
+            // show "what the camera would do without smoothing". The OBF basis state is the
+            // same as for the smoothed call, so the cost is one extra closed-form evaluation
+            // (no additional vertex collection / OBF rebuild).
+            Vector3 rawTarget = autoFramingCamera.RecomposeCameraPosition(
+                camera, raw.left, raw.right, raw.bottom, raw.top, margin, screenWidth, screenHeight);
+
             Vector3 target = autoFramingCamera.RecomposeCameraPosition(
                 camera, sLeft, sRight, sBottom, sTop, margin, screenWidth, screenHeight);
 
+            bool deadZoneHit = false;
+            bool maxSpeedHit = false;
             if (_hasPreviousPosition)
             {
-                target = ApplyMaxSpeedClamp(target, dt);
-                target = ApplyDeadZone(target);
+                target = ApplyMaxSpeedClamp(target, dt, out maxSpeedHit);
+                target = ApplyDeadZone(target, out deadZoneHit);
             }
 
             _previousPosition = target;
             _hasPreviousPosition = true;
+
+            _lastRawOffsets = raw;
+            _lastSmoothedOffsets = (sLeft, sRight, sBottom, sTop);
+            _lastRawPosition = rawTarget;
+            _lastSmoothedPosition = target;
+            _lastDeadZoneHit = deadZoneHit;
+            _lastMaxSpeedHit = maxSpeedHit;
+            _hasLastFrame = true;
+
             return target;
         }
 
@@ -113,6 +161,13 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             _topFilter.Reset();
             _hasPreviousPosition = false;
             _previousPosition = default;
+            _hasLastFrame = false;
+            _lastRawOffsets = default;
+            _lastSmoothedOffsets = default;
+            _lastRawPosition = default;
+            _lastSmoothedPosition = default;
+            _lastDeadZoneHit = false;
+            _lastMaxSpeedHit = false;
         }
 
         private void ApplyParametersToFilters()
@@ -131,8 +186,9 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             _topFilter.DerivativeCutoff = DerivativeCutoff;
         }
 
-        private Vector3 ApplyMaxSpeedClamp(Vector3 target, float dt)
+        private Vector3 ApplyMaxSpeedClamp(Vector3 target, float dt, out bool clamped)
         {
+            clamped = false;
             if (float.IsPositiveInfinity(MaxLinearSpeed) || dt <= 0f) return target;
 
             Vector3 delta = target - _previousPosition;
@@ -140,18 +196,21 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             float deltaSqr = delta.sqrMagnitude;
             if (deltaSqr > maxDistance * maxDistance && deltaSqr > 0f)
             {
+                clamped = true;
                 return _previousPosition + delta * (maxDistance / Mathf.Sqrt(deltaSqr));
             }
             return target;
         }
 
-        private Vector3 ApplyDeadZone(Vector3 target)
+        private Vector3 ApplyDeadZone(Vector3 target, out bool held)
         {
+            held = false;
             if (DeadZone <= 0f) return target;
 
             Vector3 delta = target - _previousPosition;
             if (delta.sqrMagnitude < DeadZone * DeadZone)
             {
+                held = true;
                 return _previousPosition;
             }
             return target;

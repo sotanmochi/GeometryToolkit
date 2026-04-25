@@ -599,6 +599,7 @@ MonoBehaviour:
   - {fileID: 2086066348}
   - {fileID: 1938970424}
   _marginPercent: 10
+  _preset: 1
   _horizontalMinCutoff: 1
   _horizontalBeta: 0.007
   _verticalMinCutoff: 1
@@ -608,6 +609,10 @@ MonoBehaviour:
   _updateTiming: 1
   _collectorType: 0
   _computeShader: {fileID: 0}
+  _showOnGuiOverlay: 1
+  _showSceneTrail: 1
+  _trailSampleCount: 300
+  _appliedPreset: 1
 --- !u!1 &1205523271
 GameObject:
   m_ObjectHideFlags: 0
