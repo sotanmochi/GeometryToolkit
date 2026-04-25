@@ -1,7 +1,8 @@
 using System.Collections.Generic;
 using UnityEngine;
+using GeometryToolkit.Core;
 
-namespace GeometryToolkit
+namespace GeometryToolkit.MeshCutting
 {
     public sealed class ContourLoop
     {

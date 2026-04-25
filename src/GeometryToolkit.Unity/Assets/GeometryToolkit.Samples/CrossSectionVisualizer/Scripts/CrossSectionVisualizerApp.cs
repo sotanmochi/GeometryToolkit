@@ -1,5 +1,7 @@
 using System.Collections.Generic;
 using UnityEngine;
+using GeometryToolkit.Core;
+using GeometryToolkit.MeshCutting;
 
 namespace GeometryToolkit.Samples
 {

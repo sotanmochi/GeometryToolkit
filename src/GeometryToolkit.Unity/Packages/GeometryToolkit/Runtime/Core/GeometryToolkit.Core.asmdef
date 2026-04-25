@@ -1,9 +1,7 @@
 {
-    "name": "GeometryToolkit",
-    "rootNamespace": "",
-    "references": [
-        "Unity.Mathematics"
-    ],
+    "name": "GeometryToolkit.Core",
+    "rootNamespace": "GeometryToolkit.Core",
+    "references": [],
     "includePlatforms": [],
     "excludePlatforms": [],
     "allowUnsafeCode": false,
