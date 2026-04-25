@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 
 namespace GeometryToolkit.CameraFraming.Smoothing
@@ -78,8 +79,10 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         // so OnGUI — which fires multiple times per frame for different EventType — doesn't repeat
         // the per-vertex projection work.
         private Rect _cachedMarginRect;
-        private Rect _cachedSubjectRect;
-        private bool _cachedSubjectRectValid;
+        private Rect _cachedSmoothedExtentRect;  // subject extent under the smoothed (applied) camera
+        private Rect _cachedRawExtentRect;       // subject extent under the raw camera position (filter-off baseline)
+        private bool _cachedSmoothedExtentValid;
+        private bool _cachedRawExtentValid;
 
         public Camera Camera { get => _camera; set => _camera = value; }
         public IList<Renderer> Targets => _targets;
@@ -241,9 +244,14 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         private void DrawCachedScreenFrames()
         {
             DrawGuiRectBorder(_cachedMarginRect, new Color(1f, 1f, 1f, 0.7f), 2f);
-            if (_cachedSubjectRectValid)
+            // Match the camera-trail color scheme: yellow = filter-off (raw), green = filter-on (smoothed).
+            if (_cachedRawExtentValid)
             {
-                DrawGuiRectBorder(_cachedSubjectRect, new Color(1f, 0.85f, 0.15f, 0.85f), 2f);
+                DrawGuiRectBorder(_cachedRawExtentRect, new Color(1f, 0.85f, 0.15f, 0.85f), 2f);
+            }
+            if (_cachedSmoothedExtentValid)
+            {
+                DrawGuiRectBorder(_cachedSmoothedExtentRect, new Color(0.25f, 1f, 0.5f, 0.85f), 2f);
             }
         }
 
@@ -251,17 +259,50 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         // multiplied directly (no Camera.WorldToScreenPoint per call) — this is ~3-5x faster
         // for high-vertex SkinnedMesh targets, since we skip the per-call method dispatch and
         // viewport-rect handling in WorldToScreenPoint.
+        //
+        // Two extents are computed each Tick:
+        //   - smoothed extent: subject vertices projected via the actual (smoothed) camera matrix.
+        //     Drifts away from the margin as smoothing causes lag — this is "where the subject
+        //     actually appears on screen now".
+        //   - raw extent: subject vertices projected via a virtual camera at LastRawPosition
+        //     (same orientation / projection as the actual camera). By construction this matches
+        //     the margin frame exactly — it's the "filter-off baseline", mirroring the raw
+        //     camera-position trail.
         private void UpdateScreenFrameCache(ScreenMargin margin, int width, int height)
         {
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(width, height);
             _cachedMarginRect = NdcToGuiRect(nLeft, nRight, nBottom, nTop, width, height);
 
-            _cachedSubjectRectValid = false;
+            _cachedSmoothedExtentValid = false;
+            _cachedRawExtentValid = false;
             if (_autoFramingCamera == null) return;
             var verts = _autoFramingCamera.WorldVertices;
             if (!verts.IsCreated || verts.Length == 0) return;
 
-            Matrix4x4 vp = _camera.projectionMatrix * _camera.worldToCameraMatrix;
+            // Smoothed extent — uses the actual camera's matrices (camera position has already been
+            // updated to the smoothed position by Tick before this method runs).
+            Matrix4x4 smoothedVP = _camera.projectionMatrix * _camera.worldToCameraMatrix;
+            if (TryComputeProjectedRect(verts, smoothedVP, width, height, out _cachedSmoothedExtentRect))
+            {
+                _cachedSmoothedExtentValid = true;
+            }
+
+            // Raw extent — uses a virtual camera at LastRawPosition with the same orientation +
+            // projection. Available only after the smoother has produced its first frame.
+            if (_smoother != null && _smoother.HasLastFrame)
+            {
+                Matrix4x4 rawW2C = ComputeWorldToCameraMatrix(_smoother.LastRawPosition, _camera.transform);
+                Matrix4x4 rawVP = _camera.projectionMatrix * rawW2C;
+                if (TryComputeProjectedRect(verts, rawVP, width, height, out _cachedRawExtentRect))
+                {
+                    _cachedRawExtentValid = true;
+                }
+            }
+        }
+
+        private static bool TryComputeProjectedRect(NativeArray<Vector3> verts, Matrix4x4 vp,
+                                                   int width, int height, out Rect rect)
+        {
             float halfW = width * 0.5f;
             float halfH = height * 0.5f;
 
@@ -285,11 +326,26 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 if (sy > maxY) maxY = sy;
                 validCount++;
             }
-            if (validCount == 0) return;
+            if (validCount == 0) { rect = default; return false; }
 
             // Flip y for GUI coords (y from top).
-            _cachedSubjectRect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
-            _cachedSubjectRectValid = true;
+            rect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
+            return true;
+        }
+
+        // Build a worldToCameraMatrix as Unity does (OpenGL convention — camera looks down -Z in
+        // camera space) for an arbitrary position with the supplied transform's orientation.
+        // Avoids mutating the live Transform just to read the matrix.
+        private static Matrix4x4 ComputeWorldToCameraMatrix(Vector3 pos, Transform t)
+        {
+            Vector3 r = t.right;
+            Vector3 u = t.up;
+            Vector3 f = t.forward;
+            Matrix4x4 m = Matrix4x4.identity;
+            m.m00 = r.x;  m.m01 = r.y;  m.m02 = r.z;  m.m03 = -Vector3.Dot(r, pos);
+            m.m10 = u.x;  m.m11 = u.y;  m.m12 = u.z;  m.m13 = -Vector3.Dot(u, pos);
+            m.m20 = -f.x; m.m21 = -f.y; m.m22 = -f.z; m.m23 = Vector3.Dot(f, pos);
+            return m;
         }
 
         private static Rect NdcToGuiRect(float nLeft, float nRight, float nBottom, float nTop,
