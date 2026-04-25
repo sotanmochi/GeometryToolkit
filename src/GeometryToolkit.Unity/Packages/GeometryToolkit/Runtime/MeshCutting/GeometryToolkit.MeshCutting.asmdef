@@ -2,7 +2,7 @@
     "name": "GeometryToolkit.MeshCutting",
     "rootNamespace": "GeometryToolkit.MeshCutting",
     "references": [
-        "GUID:829c28d59b0c648499f1b785fca70fd2"
+        "GeometryToolkit.Core"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
