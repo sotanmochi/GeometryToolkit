@@ -211,12 +211,25 @@
       },
       "url": "https://packages.unity.com"
     },
+    "com.yucchiy.unicli-server": {
+      "version": "https://github.com/yucchiy/UniCli.git?path=src/UniCli.Unity/Packages/com.yucchiy.unicli-server#v1.3.2",
+      "depth": 0,
+      "source": "git",
+      "dependencies": {},
+      "hash": "be0abbd15c319e1fd6c1843f4d57acbe90eedfce"
+    },
     "io.github.gkngkc.unity-standalone-file-browser": {
       "version": "https://github.com/sotanmochi/UnityStandaloneFileBrowser.git?path=Assets/StandaloneFileBrowser#1.2.3",
       "depth": 0,
       "source": "git",
       "dependencies": {},
       "hash": "6d131cbb9c83dc9d9bd2a7d57c9132d93a2554be"
+    },
+    "jp.sotanmochi.geometrytoolkit": {
+      "version": "file:GeometryToolkit",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
     },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",

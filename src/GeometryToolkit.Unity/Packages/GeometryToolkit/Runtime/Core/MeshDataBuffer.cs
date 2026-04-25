@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace GeometryToolkit
+namespace GeometryToolkit.Core
 {
     public sealed class MeshDataBuffer
     {

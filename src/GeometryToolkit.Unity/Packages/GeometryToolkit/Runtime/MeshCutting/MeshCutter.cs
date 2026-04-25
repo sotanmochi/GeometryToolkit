@@ -3,8 +3,9 @@ using System.Buffers;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Profiling;
+using GeometryToolkit.Core;
 
-namespace GeometryToolkit
+namespace GeometryToolkit.MeshCutting
 {
     public static class MeshCutter
     {

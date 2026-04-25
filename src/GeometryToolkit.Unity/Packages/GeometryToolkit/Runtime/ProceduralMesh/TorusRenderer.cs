@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace GeometryToolkit
+namespace GeometryToolkit.ProceduralMesh
 {
     [RequireComponent(typeof(MeshFilter))]
     [RequireComponent(typeof(MeshRenderer))]

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
+using GeometryToolkit.MeshCutting;
 
 namespace GeometryToolkit.Samples
 {
