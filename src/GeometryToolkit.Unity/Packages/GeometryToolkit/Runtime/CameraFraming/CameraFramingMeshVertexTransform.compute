@@ -1,0 +1,32 @@
+// Reads the SkinnedMeshRenderer's GPU vertex buffer (raw byte stream),
+// extracts vertex positions, transforms them by LocalToWorld, and writes
+// world-space positions to the output buffer.
+
+#pragma kernel TransformVertexPositions
+
+struct VertexData
+{
+    float3 Position;
+};
+
+ByteAddressBuffer GpuVertexBuffer;
+RWStructuredBuffer<VertexData> OutputVertexBuffer;
+
+uint GpuVertexBufferStride; // Bytes per vertex in GpuVertexBuffer (typically 12 for position-only or larger if interleaved)
+uint VertexCount;
+float4x4 LocalToWorld;
+
+[numthreads(64, 1, 1)]
+void TransformVertexPositions(uint3 id : SV_DispatchThreadID)
+{
+    uint vertexIndex = id.x;
+    if (vertexIndex >= VertexCount) return;
+
+    // Position is the first 3 floats (12 bytes) of each vertex by Unity's default layout convention.
+    uint byteOffset = vertexIndex * GpuVertexBufferStride;
+    uint3 raw = GpuVertexBuffer.Load3(byteOffset);
+    float3 localPos = asfloat(raw);
+
+    float3 worldPos = mul(LocalToWorld, float4(localPos, 1.0)).xyz;
+    OutputVertexBuffer[vertexIndex].Position = worldPos;
+}

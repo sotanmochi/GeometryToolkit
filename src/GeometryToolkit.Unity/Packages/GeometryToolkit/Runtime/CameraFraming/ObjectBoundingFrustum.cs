@@ -1,4 +1,5 @@
-using System.Collections.Generic;
+using System;
+using Unity.Collections;
 using UnityEngine;
 
 namespace GeometryToolkit.CameraFraming
@@ -14,41 +15,47 @@ namespace GeometryToolkit.CameraFraming
     /// must be placed for the input set to fit a target screen rectangle exactly.
     ///
     /// Internally stores each input point projected onto the camera-orientation basis (R, U, F) as
-    /// (r, u, f) coordinates, so the four offsets can be evaluated in O(N) without re-traversing
-    /// the meshes per query. The (r, u, f) values are in a frame anchored at
-    /// <see cref="ReferencePoint"/>; the frame's axes are the camera transform's right / up /
-    /// forward at the time of <see cref="Rebuild"/>.
+    /// (r, u, f) coordinates, so the four offsets can be evaluated in O(N) without re-projecting
+    /// per query. The (r, u, f) values are in a frame anchored at <see cref="ReferencePoint"/>;
+    /// the frame's axes are the camera transform's right / up / forward at the time of
+    /// <see cref="Rebuild"/>.
+    ///
+    /// This class has no knowledge of <see cref="Renderer"/> types; the caller is responsible for
+    /// supplying world-space vertex positions. See <see cref="IMeshVertexCollector"/> for the
+    /// standard collection strategies.
     /// </summary>
-    public sealed class ObjectBoundingFrustum
+    public sealed class ObjectBoundingFrustum : IDisposable
     {
         private Vector3 _referencePoint;
         private Vector3 _right;
         private Vector3 _up;
         private Vector3 _forward;
-        private Vector3[] _projectedPoints;
-        private int _projectedPointCount;
+
+        // Reusable storage buffer. Grown to the maximum required capacity and kept across
+        // Rebuild calls. Always accessed through _projectedPoints (a slice view) so that the
+        // valid count is encoded in NativeArray.Length.
+        private NativeArray<Vector3> _projectedPointsBuffer;
+        // Slice of _projectedPointsBuffer covering the vertices written by the most recent
+        // Rebuild. _projectedPoints.Length is the valid count.
+        private NativeArray<Vector3> _projectedPoints;
 
         /// <summary>
         /// Origin of the local (r, u, f) coordinate frame in which every input point is stored.
-        /// After <see cref="Rebuild"/>, each projected point represents
-        /// <c>(world_pos - ReferencePoint)</c> projected onto (<see cref="Right"/>,
-        /// <see cref="Up"/>, <see cref="Forward"/>).
         /// </summary>
         /// <remarks>
         /// Needed for two reasons:
         ///   1. World-space recomposition: the camera-position formulas in
         ///      <see cref="AutoFramingCamera"/> return local parameters (p_r, p_u, p_f); the
         ///      camera world position is recomposed as
-        ///      <c>ReferencePoint + R * p_r + U * p_u - F * p_f</c>, so the same anchor used
-        ///      during <see cref="Rebuild"/> must be retained for callers to convert back.
+        ///      <c>ReferencePoint + R * p_r + U * p_u - F * p_f</c>, so the same anchor passed to
+        ///      <see cref="Rebuild"/> must be retained for callers to convert back.
         ///   2. Numerical precision: shifting the reference point translates (r, u, f) and
         ///      (p_r, p_u, p_f) by the same amount, leaving the final camera position invariant.
         ///      Choosing a point near the input keeps those values small, avoiding float
         ///      precision loss when the object lies far from the world origin.
         ///
-        /// <see cref="Rebuild"/> currently uses the first renderer's transform position. Other
-        /// choices (bounding-box center, convex-hull centroid, explicit user-supplied point) are
-        /// discussed in the design document §7.5.
+        /// Choices for the reference point (e.g. first renderer's transform position, bounding-box
+        /// center, convex-hull centroid) are discussed in the design document §7.5.
         /// </remarks>
         public Vector3 ReferencePoint => _referencePoint;
 
@@ -62,60 +69,56 @@ namespace GeometryToolkit.CameraFraming
         public Vector3 Forward => _forward;
 
         /// <summary>Number of vertices currently stored from the last <see cref="Rebuild"/>.</summary>
-        public int PointCount => _projectedPointCount;
+        public int PointCount => _projectedPoints.Length;
 
         /// <summary>
-        /// Collect vertices from the given renderers and project them onto the camera's
-        /// orientation basis. Subsequent <see cref="ComputeFrustumPlaneOffsets"/> calls reuse
-        /// these projections without re-traversing the meshes.
-        ///
-        /// Supports <see cref="MeshRenderer"/>; other renderer types (e.g.
-        /// <see cref="SkinnedMeshRenderer"/>) are silently skipped.
+        /// Release the internal NativeArray buffer.
         /// </summary>
-        public void Rebuild(IReadOnlyList<Renderer> renderers, Camera camera)
+        public void Dispose()
         {
-            if (renderers == null) throw new System.ArgumentNullException(nameof(renderers));
-            if (camera == null) throw new System.ArgumentNullException(nameof(camera));
+            if (_projectedPointsBuffer.IsCreated) _projectedPointsBuffer.Dispose();
+            _projectedPoints = default;
+        }
 
-            _right = camera.transform.right;
-            _up = camera.transform.up;
-            _forward = camera.transform.forward;
-            _referencePoint = renderers.Count > 0 ? renderers[0].transform.position : Vector3.zero;
+        /// <summary>
+        /// Project the supplied world-space vertices into the local (r, u, f) frame anchored at
+        /// <paramref name="referencePoint"/> and using the supplied orthonormal basis, then cache
+        /// the result so subsequent <see cref="ComputeFrustumPlaneOffsets"/> calls reuse it.
+        /// </summary>
+        /// <param name="worldVertices">World-space vertex positions. Pass a sub-array
+        /// (<see cref="NativeArray{T}.GetSubArray"/>) when the source buffer holds extra
+        /// reserve capacity beyond the valid count.</param>
+        /// <param name="right">R axis of the local frame (camera's right direction in world space).</param>
+        /// <param name="up">U axis of the local frame (camera's up direction in world space).</param>
+        /// <param name="forward">F axis of the local frame (camera's forward direction in world space).</param>
+        /// <param name="referencePoint">Origin of the local (r, u, f) frame.</param>
+        /// <remarks>
+        /// (<paramref name="right"/>, <paramref name="up"/>, <paramref name="forward"/>) is
+        /// expected to be an orthonormal basis; the algorithm assumes this without verification.
+        /// </remarks>
+        public void Rebuild(NativeArray<Vector3> worldVertices,
+                            Vector3 right, Vector3 up, Vector3 forward,
+                            Vector3 referencePoint)
+        {
+            int vertexCount = worldVertices.Length;
 
-            int totalVertexCount = 0;
-            for (int i = 0; i < renderers.Count; i++)
+            _right = right;
+            _up = up;
+            _forward = forward;
+            _referencePoint = referencePoint;
+
+            EnsureBufferCapacity(vertexCount);
+
+            for (int i = 0; i < vertexCount; i++)
             {
-                var mesh = TryGetSharedMesh(renderers[i]);
-                if (mesh == null) continue;
-                totalVertexCount += mesh.vertexCount;
+                var d = worldVertices[i] - _referencePoint;
+                _projectedPointsBuffer[i] = new Vector3(
+                    Vector3.Dot(d, _right),
+                    Vector3.Dot(d, _up),
+                    Vector3.Dot(d, _forward)
+                );
             }
-
-            if (_projectedPoints == null || _projectedPoints.Length < totalVertexCount)
-            {
-                _projectedPoints = new Vector3[totalVertexCount];
-            }
-
-            int writeIndex = 0;
-            for (int i = 0; i < renderers.Count; i++)
-            {
-                var renderer = renderers[i];
-                var mesh = TryGetSharedMesh(renderer);
-                if (mesh == null) continue;
-
-                var localToWorld = renderer.transform.localToWorldMatrix;
-                var vertices = mesh.vertices;
-                for (int j = 0; j < vertices.Length; j++)
-                {
-                    var world = localToWorld.MultiplyPoint3x4(vertices[j]);
-                    var d = world - _referencePoint;
-                    _projectedPoints[writeIndex++] = new Vector3(
-                        Vector3.Dot(d, _right),
-                        Vector3.Dot(d, _up),
-                        Vector3.Dot(d, _forward)
-                    );
-                }
-            }
-            _projectedPointCount = writeIndex;
+            _projectedPoints = _projectedPointsBuffer.GetSubArray(0, vertexCount);
         }
 
         /// <summary>
@@ -144,10 +147,10 @@ namespace GeometryToolkit.CameraFraming
         public (float left, float right, float bottom, float top) ComputeFrustumPlaneOffsets(
             float nLeft, float nRight, float nBottom, float nTop, float kHorizontal, float kVertical)
         {
-            if (_projectedPointCount == 0)
+            if (_projectedPoints.Length == 0)
             {
-                throw new System.InvalidOperationException(
-                    "ObjectBoundingFrustum has no points. Call Rebuild() with non-empty renderers first.");
+                throw new InvalidOperationException(
+                    "ObjectBoundingFrustum has no points. Call Rebuild() with non-empty input first.");
             }
 
             float left = float.PositiveInfinity;
@@ -155,7 +158,7 @@ namespace GeometryToolkit.CameraFraming
             float bottom = float.PositiveInfinity;
             float top = float.NegativeInfinity;
 
-            for (int i = 0; i < _projectedPointCount; i++)
+            for (int i = 0; i < _projectedPoints.Length; i++)
             {
                 var p = _projectedPoints[i];
                 float r = p.x;
@@ -176,14 +179,12 @@ namespace GeometryToolkit.CameraFraming
             return (left, right, bottom, top);
         }
 
-        private static Mesh TryGetSharedMesh(Renderer renderer)
+        private void EnsureBufferCapacity(int requiredCapacity)
         {
-            if (renderer is MeshRenderer meshRenderer)
-            {
-                var meshFilter = meshRenderer.GetComponent<MeshFilter>();
-                return meshFilter != null ? meshFilter.sharedMesh : null;
-            }
-            return null;
+            if (_projectedPointsBuffer.IsCreated && _projectedPointsBuffer.Length >= requiredCapacity) return;
+            if (_projectedPointsBuffer.IsCreated) _projectedPointsBuffer.Dispose();
+            _projectedPointsBuffer = new NativeArray<Vector3>(requiredCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            _projectedPoints = default; // Invalidate the slice; Rebuild will recreate it after writing the new data.
         }
     }
 }
