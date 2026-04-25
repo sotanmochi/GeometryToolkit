@@ -35,9 +35,23 @@ namespace GeometryToolkit.CameraFraming
         private readonly IMeshVertexCollector _vertexCollector;
         private readonly bool _ownsVertexCollector;
         private NativeArray<Vector3> _worldVertexBuffer;
+        private int _worldVertexCount;
 
         public ObjectBoundingFrustum BoundingFrustum => _boundingFrustum;
         public IMeshVertexCollector VertexCollector => _vertexCollector;
+
+        /// <summary>
+        /// Read-only view of the world-space vertices collected during the most recent
+        /// <see cref="BuildBoundingFrustum(Camera, IReadOnlyList{Renderer})"/> /
+        /// <see cref="ComputeFrustumPlaneOffsets(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>
+        /// call. Empty <see cref="NativeArray{T}"/> if no build has run yet. Useful for
+        /// debug visualization (e.g. projecting these to screen space to draw the actual
+        /// subject footprint over the framing margin).
+        /// </summary>
+        public NativeArray<Vector3> WorldVertices =>
+            _worldVertexBuffer.IsCreated && _worldVertexCount > 0
+                ? _worldVertexBuffer.GetSubArray(0, _worldVertexCount)
+                : default;
 
         /// <summary>
         /// Creates an instance that owns and disposes a default <see cref="MeshVertexCollector"/>.
@@ -144,6 +158,7 @@ namespace GeometryToolkit.CameraFraming
 
             EnsureWorldVertexBufferCapacity(totalVertexCount);
             int written = _vertexCollector.WriteWorldVertices(renderers, _worldVertexBuffer);
+            _worldVertexCount = written;
 
             var referencePoint = renderers[0] != null ? renderers[0].transform.position : Vector3.zero;
             var t = camera.transform;

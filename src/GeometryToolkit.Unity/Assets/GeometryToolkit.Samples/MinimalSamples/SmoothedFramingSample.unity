@@ -610,6 +610,7 @@ MonoBehaviour:
   _collectorType: 0
   _computeShader: {fileID: 0}
   _showOnGuiOverlay: 1
+  _showScreenFrame: 1
   _showSceneTrail: 1
   _trailSampleCount: 300
   _appliedPreset: 1

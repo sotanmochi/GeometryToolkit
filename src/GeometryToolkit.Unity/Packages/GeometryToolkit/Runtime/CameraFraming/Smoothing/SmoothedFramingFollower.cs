@@ -52,6 +52,9 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField, Tooltip("Show numeric overlay of raw / smoothed offsets and clamp state in the Game view.")]
         private bool _showOnGuiOverlay = false;
 
+        [SerializeField, Tooltip("Draw the screen-space margin rectangle (white) and the actual subject bounding rectangle (yellow) in the Game view. Lets you see whether smoothing causes the subject to leak outside the requested margin.")]
+        private bool _showScreenFrame = false;
+
         [SerializeField, Tooltip("Show raw vs smoothed camera position trail in the Scene view.")]
         private bool _showSceneTrail = false;
 
@@ -194,6 +197,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
         private void OnGUI()
         {
+            if (_showScreenFrame && _camera != null) DrawScreenFrames();
             if (!_showOnGuiOverlay || _smoother == null || !_smoother.HasLastFrame) return;
 
             var raw = _smoother.LastRawOffsets;
@@ -216,6 +220,82 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
             var rect = new Rect(Pad, Pad, 540, 130);
             GUI.Box(rect, text, style);
+        }
+
+        private void DrawScreenFrames()
+        {
+            int width = Mathf.Max(1, Screen.width);
+            int height = Mathf.Max(1, Screen.height);
+
+            // (a) Margin target rectangle — the bounds the framing is supposed to fit inside.
+            var margin = ScreenMargin.Uniform(_marginPercent, ScreenMarginUnit.Percentage);
+            var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(width, height);
+            Rect marginRect = NdcToGuiRect(nLeft, nRight, nBottom, nTop, width, height);
+            DrawGuiRectBorder(marginRect, new Color(1f, 1f, 1f, 0.7f), 2f);
+
+            // (b) Actual subject screen extent — bounding rectangle of all input vertices
+            // projected to screen via the (post-smoothing) camera position. Shows whether the
+            // subject is still inside the margin despite the smoothing lag.
+            if (_autoFramingCamera == null) return;
+            var verts = _autoFramingCamera.WorldVertices;
+            if (!verts.IsCreated || verts.Length == 0) return;
+
+            float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
+            float minY = float.PositiveInfinity, maxY = float.NegativeInfinity;
+            int validCount = 0;
+            for (int i = 0; i < verts.Length; i++)
+            {
+                Vector3 sp = _camera.WorldToScreenPoint(verts[i]);
+                if (sp.z <= 0f) continue;  // skip points behind the camera
+                if (sp.x < minX) minX = sp.x;
+                if (sp.x > maxX) maxX = sp.x;
+                if (sp.y < minY) minY = sp.y;
+                if (sp.y > maxY) maxY = sp.y;
+                validCount++;
+            }
+            if (validCount == 0) return;
+
+            // Camera.WorldToScreenPoint returns y measured from the bottom; OnGUI's Rect
+            // measures y from the top — flip accordingly.
+            Rect subjectRect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
+            DrawGuiRectBorder(subjectRect, new Color(1f, 0.85f, 0.15f, 0.85f), 2f);
+        }
+
+        private static Rect NdcToGuiRect(float nLeft, float nRight, float nBottom, float nTop,
+                                        int screenWidth, int screenHeight)
+        {
+            float pixelLeft = (nLeft + 1f) * 0.5f * screenWidth;
+            float pixelRight = (nRight + 1f) * 0.5f * screenWidth;
+            float pixelBottom = (nBottom + 1f) * 0.5f * screenHeight;
+            float pixelTop = (nTop + 1f) * 0.5f * screenHeight;
+            // Flip y for GUI coords (y from top).
+            return new Rect(pixelLeft, screenHeight - pixelTop, pixelRight - pixelLeft, pixelTop - pixelBottom);
+        }
+
+        private static Texture2D s_lineTexture;
+        private static Texture2D LineTexture
+        {
+            get
+            {
+                if (s_lineTexture == null)
+                {
+                    s_lineTexture = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
+                    s_lineTexture.SetPixel(0, 0, Color.white);
+                    s_lineTexture.Apply();
+                }
+                return s_lineTexture;
+            }
+        }
+
+        private static void DrawGuiRectBorder(Rect r, Color color, float thickness)
+        {
+            Color prev = GUI.color;
+            GUI.color = color;
+            GUI.DrawTexture(new Rect(r.x, r.y, r.width, thickness), LineTexture);                     // top
+            GUI.DrawTexture(new Rect(r.x, r.yMax - thickness, r.width, thickness), LineTexture);      // bottom
+            GUI.DrawTexture(new Rect(r.x, r.y, thickness, r.height), LineTexture);                    // left
+            GUI.DrawTexture(new Rect(r.xMax - thickness, r.y, thickness, r.height), LineTexture);     // right
+            GUI.color = prev;
         }
 
         private void OnDrawGizmos()
