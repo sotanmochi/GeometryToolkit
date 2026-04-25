@@ -225,6 +225,12 @@
       "dependencies": {},
       "hash": "6d131cbb9c83dc9d9bd2a7d57c9132d93a2554be"
     },
+    "jp.sotanmochi.geometrytoolkit": {
+      "version": "file:GeometryToolkit",
+      "depth": 0,
+      "source": "embedded",
+      "dependencies": {}
+    },
     "com.unity.modules.accessibility": {
       "version": "1.0.0",
       "depth": 0,
