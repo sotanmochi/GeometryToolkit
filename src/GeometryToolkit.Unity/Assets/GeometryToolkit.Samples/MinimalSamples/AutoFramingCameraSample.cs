@@ -7,7 +7,7 @@ namespace GeometryToolkit.Samples
     /// Repositions the assigned camera each frame so the assigned renderers fit inside the
     /// requested margins. Camera orientation is left untouched.
     /// </summary>
-    public sealed class AutoFramingSample : MonoBehaviour
+    public sealed class AutoFramingCameraSample : MonoBehaviour
     {
         [SerializeField] private Camera _camera;
         [SerializeField] private Renderer[] _renderers;
