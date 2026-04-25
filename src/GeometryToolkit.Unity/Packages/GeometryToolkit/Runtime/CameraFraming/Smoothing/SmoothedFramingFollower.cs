@@ -227,6 +227,18 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
             const int Pad = 8;
             var style = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 12, richText = true };
+
+            string frameInfo = "";
+            if (_showScreenFrame)
+            {
+                string FormatRect(Rect r, bool valid)
+                    => valid ? $"x={r.x,5:F0} y={r.y,5:F0} w={r.width,5:F0} h={r.height,5:F0}" : "(invalid)";
+                frameInfo =
+                    $"<color=#FFD835>raw frame  (yellow):</color> {FormatRect(_cachedRawExtentRect, _cachedRawExtentValid)}\n" +
+                    $"<color=#40FF80>smth frame (green):</color>  {FormatRect(_cachedSmoothedExtentRect, _cachedSmoothedExtentValid)}\n" +
+                    $"<color=#FFFFFF>margin frame (white):</color>{FormatRect(_cachedMarginRect, true)}\n";
+            }
+
             string text =
                 $"<b>SmoothedFramingFollower</b>\n" +
                 $"preset:    {_preset}    dt: {Time.deltaTime * 1000f:F2} ms\n" +
@@ -235,9 +247,11 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 $"  delta L/R/B/T:  {smoothed.left - raw.left,+7:F4} / {smoothed.right - raw.right,+7:F4} / {smoothed.bottom - raw.bottom,+7:F4} / {smoothed.top - raw.top,+7:F4}\n" +
                 $"raw      pos:  ({rawPos.x,7:F3}, {rawPos.y,7:F3}, {rawPos.z,7:F3})\n" +
                 $"smoothed pos:  ({smoothedPos.x,7:F3}, {smoothedPos.y,7:F3}, {smoothedPos.z,7:F3})    Δ = {positionDelta,6:F4} m\n" +
-                $"DeadZone hit:  {_smoother.LastDeadZoneHit}    MaxSpeed clamp hit: {_smoother.LastMaxSpeedHit}";
+                $"DeadZone hit:  {_smoother.LastDeadZoneHit}    MaxSpeed clamp hit: {_smoother.LastMaxSpeedHit}\n" +
+                frameInfo;
 
-            var rect = new Rect(Pad, Pad, 540, 130);
+            int height = string.IsNullOrEmpty(frameInfo) ? 130 : 180;
+            var rect = new Rect(Pad, Pad, 580, height);
             GUI.Box(rect, text, style);
         }
 
@@ -278,25 +292,23 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             if (_autoFramingCamera == null) return;
             var verts = _autoFramingCamera.WorldVertices;
             if (!verts.IsCreated || verts.Length == 0) return;
+            if (_smoother == null || !_smoother.HasLastFrame) return;
 
-            // Smoothed extent — uses the actual camera's matrices (camera position has already been
-            // updated to the smoothed position by Tick before this method runs).
-            Matrix4x4 smoothedVP = _camera.projectionMatrix * _camera.worldToCameraMatrix;
+            // Build both view-projection matrices via the same helper to keep the math
+            // symmetric — avoids any divergence between Unity's internal worldToCameraMatrix
+            // caching state and the custom matrix we use for the raw position.
+            Matrix4x4 smoothedW2C = ComputeWorldToCameraMatrix(_smoother.LastSmoothedPosition, _camera.transform);
+            Matrix4x4 smoothedVP = _camera.projectionMatrix * smoothedW2C;
             if (TryComputeProjectedRect(verts, smoothedVP, width, height, out _cachedSmoothedExtentRect))
             {
                 _cachedSmoothedExtentValid = true;
             }
 
-            // Raw extent — uses a virtual camera at LastRawPosition with the same orientation +
-            // projection. Available only after the smoother has produced its first frame.
-            if (_smoother != null && _smoother.HasLastFrame)
+            Matrix4x4 rawW2C = ComputeWorldToCameraMatrix(_smoother.LastRawPosition, _camera.transform);
+            Matrix4x4 rawVP = _camera.projectionMatrix * rawW2C;
+            if (TryComputeProjectedRect(verts, rawVP, width, height, out _cachedRawExtentRect))
             {
-                Matrix4x4 rawW2C = ComputeWorldToCameraMatrix(_smoother.LastRawPosition, _camera.transform);
-                Matrix4x4 rawVP = _camera.projectionMatrix * rawW2C;
-                if (TryComputeProjectedRect(verts, rawVP, width, height, out _cachedRawExtentRect))
-                {
-                    _cachedRawExtentValid = true;
-                }
+                _cachedRawExtentValid = true;
             }
         }
 
