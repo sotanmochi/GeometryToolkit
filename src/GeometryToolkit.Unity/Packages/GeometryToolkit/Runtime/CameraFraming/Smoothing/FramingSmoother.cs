@@ -25,6 +25,8 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         private readonly OneEuroFilter _bottomFilter = new();
         private readonly OneEuroFilter _topFilter = new();
 
+        private FramingSmoothingSettings _settings = FramingSmoothingSettings.CreateDefault();
+
         /// <summary>
         /// Master switch. When false, the One-Euro filters and the dead-zone / max-speed clamps
         /// are bypassed: smoothed offsets equal raw offsets and the smoothed camera position
@@ -32,42 +34,80 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         /// unfiltered baseline. The internal filter state is reset while disabled so the next
         /// re-enabled frame initializes cleanly from the current input.
         /// </summary>
-        public bool Enabled { get; set; } = true;
+        public FramingSmoothingSettings Settings
+        {
+            get => _settings;
+            set => _settings = value;
+        }
+
+        public bool Enabled
+        {
+            get => _settings.Enabled;
+            set => _settings.Enabled = value;
+        }
 
         /// <summary>One-Euro minimum cutoff (Hz) applied to left / right offsets.</summary>
-        public float HorizontalMinCutoff { get; set; } = 1f;
+        public float HorizontalMinCutoff
+        {
+            get => _settings.HorizontalMinCutoff;
+            set => _settings.HorizontalMinCutoff = value;
+        }
 
         /// <summary>One-Euro minimum cutoff (Hz) applied to bottom / top offsets.</summary>
-        public float VerticalMinCutoff { get; set; } = 1f;
+        public float VerticalMinCutoff
+        {
+            get => _settings.VerticalMinCutoff;
+            set => _settings.VerticalMinCutoff = value;
+        }
 
         /// <summary>One-Euro speed coefficient applied to left / right offsets.</summary>
-        public float HorizontalBeta { get; set; } = 0.007f;
+        public float HorizontalBeta
+        {
+            get => _settings.HorizontalBeta;
+            set => _settings.HorizontalBeta = value;
+        }
 
         /// <summary>One-Euro speed coefficient applied to bottom / top offsets.</summary>
-        public float VerticalBeta { get; set; } = 0.007f;
+        public float VerticalBeta
+        {
+            get => _settings.VerticalBeta;
+            set => _settings.VerticalBeta = value;
+        }
 
         /// <summary>One-Euro cutoff (Hz) for the speed estimate. 1.0 is the canonical default.</summary>
-        public float DerivativeCutoff { get; set; } = 1f;
+        public float DerivativeCutoff
+        {
+            get => _settings.DerivativeCutoff;
+            set => _settings.DerivativeCutoff = value;
+        }
 
         /// <summary>
         /// If the recomposed camera position would move less than this distance (meters) from
         /// the previous frame's position, the previous position is held instead. Suppresses
         /// idle micro-jitter. Set to 0 to disable.
         /// </summary>
-        public float DeadZone { get; set; } = 0.005f;
+        public float DeadZone
+        {
+            get => _settings.DeadZone;
+            set => _settings.DeadZone = value;
+        }
 
         /// <summary>
         /// Upper bound on camera-position translation per second (m/s). Caps abrupt jumps
         /// (e.g. target switch). Default <see cref="float.PositiveInfinity"/> = no limit.
         /// </summary>
-        public float MaxLinearSpeed { get; set; } = float.PositiveInfinity;
+        public float MaxLinearSpeed
+        {
+            get => _settings.MaxLinearSpeed;
+            set => _settings.MaxLinearSpeed = value;
+        }
 
         private bool _hasPreviousPosition;
         private Vector3 _previousPosition;
 
         // Last-frame snapshots, exposed via properties for debug visualization.
-        private (float left, float right, float bottom, float top) _lastRawOffsets;
-        private (float left, float right, float bottom, float top) _lastSmoothedOffsets;
+        private FramingOffsets _lastRawOffsets;
+        private FramingOffsets _lastSmoothedOffsets;
         private Vector3 _lastRawPosition;
         private Vector3 _lastSmoothedPosition;
         private bool _lastDeadZoneHit;
@@ -78,10 +118,10 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         public bool HasLastFrame => _hasLastFrame;
 
         /// <summary>Raw frustum-plane offsets (pre-filter) from the most recent call.</summary>
-        public (float left, float right, float bottom, float top) LastRawOffsets => _lastRawOffsets;
+        public FramingOffsets LastRawOffsets => _lastRawOffsets;
 
         /// <summary>Smoothed frustum-plane offsets (post-filter) from the most recent call.</summary>
-        public (float left, float right, float bottom, float top) LastSmoothedOffsets => _lastSmoothedOffsets;
+        public FramingOffsets LastSmoothedOffsets => _lastSmoothedOffsets;
 
         /// <summary>Camera position recomposed from the raw offsets (no smoothing applied).</summary>
         public Vector3 LastRawPosition => _lastRawPosition;
@@ -115,65 +155,70 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             int screenHeight,
             float dt)
         {
-            ApplyParametersToFilters();
-
-            var raw = autoFramingCamera.ComputeFrustumPlaneOffsets(
+            FramingOffsets rawOffsets = autoFramingCamera.ComputeFramingOffsets(
                 camera, renderers, margin, screenWidth, screenHeight);
+            FramingOffsets smoothedOffsets = SmoothOffsets(rawOffsets, dt);
+            Vector3 rawPosition = autoFramingCamera.RecomposeCameraPosition(camera, rawOffsets, margin, screenWidth, screenHeight);
+            Vector3 smoothedPosition = autoFramingCamera.RecomposeCameraPosition(camera, smoothedOffsets, margin, screenWidth, screenHeight);
+            return FinalizeFrame(rawOffsets, smoothedOffsets, rawPosition, smoothedPosition, dt).SmoothedPosition;
+        }
 
-            float sLeft, sRight, sBottom, sTop;
-            if (Enabled)
+        /// <summary>
+        /// Apply One-Euro filtering to raw frustum-plane offsets.
+        /// </summary>
+        public FramingOffsets SmoothOffsets(FramingOffsets rawOffsets, float dt)
+        {
+            ApplyParametersToFilters();
+            if (!Enabled)
             {
-                sLeft = _leftFilter.Filter(raw.left, dt);
-                sRight = _rightFilter.Filter(raw.right, dt);
-                sBottom = _bottomFilter.Filter(raw.bottom, dt);
-                sTop = _topFilter.Filter(raw.top, dt);
-            }
-            else
-            {
-                // Bypass smoothing entirely. Reset filter state so the next Enabled frame
-                // re-initializes from the current input rather than carrying stale prev-values.
-                _leftFilter.Reset();
-                _rightFilter.Reset();
-                _bottomFilter.Reset();
-                _topFilter.Reset();
-                sLeft = raw.left;
-                sRight = raw.right;
-                sBottom = raw.bottom;
-                sTop = raw.top;
+                ResetFiltersOnly();
+                return rawOffsets;
             }
 
-            // Recompose the raw (unsmoothed) position too — used by debug visualization to
-            // show "what the camera would do without smoothing". The OBF basis state is the
-            // same as for the smoothed call, so the cost is one extra closed-form evaluation
-            // (no additional vertex collection / OBF rebuild).
-            Vector3 rawTarget = autoFramingCamera.RecomposeCameraPosition(
-                camera, raw.left, raw.right, raw.bottom, raw.top, margin, screenWidth, screenHeight);
+            return new FramingOffsets(
+                _leftFilter.Filter(rawOffsets.Left, dt),
+                _rightFilter.Filter(rawOffsets.Right, dt),
+                _bottomFilter.Filter(rawOffsets.Bottom, dt),
+                _topFilter.Filter(rawOffsets.Top, dt));
+        }
 
-            Vector3 target = autoFramingCamera.RecomposeCameraPosition(
-                camera, sLeft, sRight, sBottom, sTop, margin, screenWidth, screenHeight);
-
+        /// <summary>
+        /// Apply output clamps, update history, and return the frame snapshot used for debug views.
+        /// </summary>
+        public FramingSmoothingResult FinalizeFrame(
+            FramingOffsets rawOffsets,
+            FramingOffsets smoothedOffsets,
+            Vector3 rawPosition,
+            Vector3 smoothedPosition,
+            float dt)
+        {
             bool deadZoneHit = false;
             bool maxSpeedHit = false;
-            // Output clamps only meaningful when smoothing is enabled — when disabled we want
-            // raw == smoothed end-to-end so the visualization can verify the baseline.
+            Vector3 finalPosition = smoothedPosition;
             if (Enabled && _hasPreviousPosition)
             {
-                target = ApplyMaxSpeedClamp(target, dt, out maxSpeedHit);
-                target = ApplyDeadZone(target, out deadZoneHit);
+                finalPosition = ApplyMaxSpeedClamp(finalPosition, dt, out maxSpeedHit);
+                finalPosition = ApplyDeadZone(finalPosition, out deadZoneHit);
             }
 
-            _previousPosition = target;
+            _previousPosition = finalPosition;
             _hasPreviousPosition = true;
 
-            _lastRawOffsets = raw;
-            _lastSmoothedOffsets = (sLeft, sRight, sBottom, sTop);
-            _lastRawPosition = rawTarget;
-            _lastSmoothedPosition = target;
+            _lastRawOffsets = rawOffsets;
+            _lastSmoothedOffsets = smoothedOffsets;
+            _lastRawPosition = rawPosition;
+            _lastSmoothedPosition = finalPosition;
             _lastDeadZoneHit = deadZoneHit;
             _lastMaxSpeedHit = maxSpeedHit;
             _hasLastFrame = true;
 
-            return target;
+            return new FramingSmoothingResult(
+                rawOffsets,
+                smoothedOffsets,
+                rawPosition,
+                finalPosition,
+                deadZoneHit,
+                maxSpeedHit);
         }
 
         /// <summary>
@@ -183,10 +228,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         /// </summary>
         public void Reset()
         {
-            _leftFilter.Reset();
-            _rightFilter.Reset();
-            _bottomFilter.Reset();
-            _topFilter.Reset();
+            ResetFiltersOnly();
             _hasPreviousPosition = false;
             _previousPosition = default;
             _hasLastFrame = false;
@@ -200,27 +242,35 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
         private void ApplyParametersToFilters()
         {
-            _leftFilter.MinCutoff = HorizontalMinCutoff;
-            _leftFilter.Beta = HorizontalBeta;
-            _leftFilter.DerivativeCutoff = DerivativeCutoff;
-            _rightFilter.MinCutoff = HorizontalMinCutoff;
-            _rightFilter.Beta = HorizontalBeta;
-            _rightFilter.DerivativeCutoff = DerivativeCutoff;
-            _bottomFilter.MinCutoff = VerticalMinCutoff;
-            _bottomFilter.Beta = VerticalBeta;
-            _bottomFilter.DerivativeCutoff = DerivativeCutoff;
-            _topFilter.MinCutoff = VerticalMinCutoff;
-            _topFilter.Beta = VerticalBeta;
-            _topFilter.DerivativeCutoff = DerivativeCutoff;
+            _leftFilter.MinCutoff = _settings.HorizontalMinCutoff;
+            _leftFilter.Beta = _settings.HorizontalBeta;
+            _leftFilter.DerivativeCutoff = _settings.DerivativeCutoff;
+            _rightFilter.MinCutoff = _settings.HorizontalMinCutoff;
+            _rightFilter.Beta = _settings.HorizontalBeta;
+            _rightFilter.DerivativeCutoff = _settings.DerivativeCutoff;
+            _bottomFilter.MinCutoff = _settings.VerticalMinCutoff;
+            _bottomFilter.Beta = _settings.VerticalBeta;
+            _bottomFilter.DerivativeCutoff = _settings.DerivativeCutoff;
+            _topFilter.MinCutoff = _settings.VerticalMinCutoff;
+            _topFilter.Beta = _settings.VerticalBeta;
+            _topFilter.DerivativeCutoff = _settings.DerivativeCutoff;
+        }
+
+        private void ResetFiltersOnly()
+        {
+            _leftFilter.Reset();
+            _rightFilter.Reset();
+            _bottomFilter.Reset();
+            _topFilter.Reset();
         }
 
         private Vector3 ApplyMaxSpeedClamp(Vector3 target, float dt, out bool clamped)
         {
             clamped = false;
-            if (float.IsPositiveInfinity(MaxLinearSpeed) || dt <= 0f) return target;
+            if (_settings.MaxLinearSpeed <= 0f || float.IsPositiveInfinity(_settings.MaxLinearSpeed) || dt <= 0f) return target;
 
             Vector3 delta = target - _previousPosition;
-            float maxDistance = MaxLinearSpeed * dt;
+            float maxDistance = _settings.MaxLinearSpeed * dt;
             float deltaSqr = delta.sqrMagnitude;
             if (deltaSqr > maxDistance * maxDistance && deltaSqr > 0f)
             {
@@ -233,10 +283,10 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         private Vector3 ApplyDeadZone(Vector3 target, out bool held)
         {
             held = false;
-            if (DeadZone <= 0f) return target;
+            if (_settings.DeadZone <= 0f) return target;
 
             Vector3 delta = target - _previousPosition;
-            if (delta.sqrMagnitude < DeadZone * DeadZone)
+            if (delta.sqrMagnitude < _settings.DeadZone * _settings.DeadZone)
             {
                 held = true;
                 return _previousPosition;

@@ -133,9 +133,9 @@ namespace GeometryToolkit.CameraFraming
         {
             if (camera == null) throw new ArgumentNullException(nameof(camera));
             var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
-            var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
-                p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical);
-            return RecomposeFromOffsets(in p, left, right, bottom, top);
+            FramingOffsets offsets = FramingOffsets.FromTuple(_boundingFrustum.ComputeFrustumPlaneOffsets(
+                p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical));
+            return RecomposeFromOffsets(in p, offsets.Left, offsets.Right, offsets.Bottom, offsets.Top);
         }
 
         /// <summary>
@@ -148,15 +148,29 @@ namespace GeometryToolkit.CameraFraming
         /// </summary>
         public Vector3 RecomposeCameraPosition(
             Camera camera,
-            float left, float right, float bottom, float top,
+            in FramingOffsets offsets,
             ScreenMargin margin,
             int screenWidth,
             int screenHeight)
         {
             if (camera == null) throw new ArgumentNullException(nameof(camera));
             var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
-            // return RecomposeFromOffsets(in p, p.left, p.right, p.bottom, p.top); // WIP
-            return RecomposeFromOffsets(in p, left, right, bottom, top);
+            return RecomposeFromOffsets(in p, offsets.Left, offsets.Right, offsets.Bottom, offsets.Top);
+        }
+
+        /// <summary>
+        /// Recompose the camera world position from arbitrary frustum-plane offsets, using the
+        /// currently cached <see cref="BoundingFrustum"/> basis (built by a prior
+        /// <see cref="BuildBoundingFrustum"/> / <see cref="ComputeFrustumPlaneOffsets"/> call).
+        /// </summary>
+        public Vector3 RecomposeCameraPosition(
+            Camera camera,
+            float left, float right, float bottom, float top,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            return RecomposeCameraPosition(camera, new FramingOffsets(left, right, bottom, top), margin, screenWidth, screenHeight);
         }
 
         /// <summary>
@@ -206,6 +220,20 @@ namespace GeometryToolkit.CameraFraming
             var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
             return _boundingFrustum.ComputeFrustumPlaneOffsets(
                 p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical);
+        }
+
+        /// <summary>
+        /// Convenience wrapper around <see cref="ComputeFrustumPlaneOffsets(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>
+        /// that returns the offsets as a named value object.
+        /// </summary>
+        public FramingOffsets ComputeFramingOffsets(
+            Camera camera,
+            IReadOnlyList<Renderer> renderers,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            return FramingOffsets.FromTuple(ComputeFrustumPlaneOffsets(camera, renderers, margin, screenWidth, screenHeight));
         }
 
         private void EnsureWorldVertexBufferCapacity(int requiredCapacity)

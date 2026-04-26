@@ -36,68 +36,61 @@ namespace GeometryToolkit.CameraFraming.Smoothing
     /// public parameter properties. Centralized here so the table can be tuned without
     /// editing the smoother itself.
     /// </summary>
+    public static class FramingSmoothingPresetCatalog
+    {
+        public static FramingSmoothingSettings Get(FramingSmoothingPreset preset)
+        {
+            switch (preset)
+            {
+                case FramingSmoothingPreset.Tight:
+                    return CreateSettings(2.0f, 2.0f, 0.02f, 0.02f, 0.002f, 0f);
+                case FramingSmoothingPreset.Documentary:
+                    return CreateSettings(0.7f, 0.7f, 0.005f, 0.005f, 0.01f, 30f);
+                case FramingSmoothingPreset.Cinematic:
+                    return CreateSettings(0.3f, 0.3f, 0.003f, 0.003f, 0.02f, 10f);
+                case FramingSmoothingPreset.Standard:
+                default:
+                    return CreateSettings(1.0f, 1.0f, 0.007f, 0.007f, 0.005f, 50f);
+            }
+        }
+
+        private static FramingSmoothingSettings CreateSettings(
+            float horizontalMinCutoff,
+            float verticalMinCutoff,
+            float horizontalBeta,
+            float verticalBeta,
+            float deadZone,
+            float maxLinearSpeed)
+        {
+            return new FramingSmoothingSettings
+            {
+                Enabled = true,
+                HorizontalMinCutoff = horizontalMinCutoff,
+                VerticalMinCutoff = verticalMinCutoff,
+                HorizontalBeta = horizontalBeta,
+                VerticalBeta = verticalBeta,
+                DerivativeCutoff = 1f,
+                DeadZone = deadZone,
+                MaxLinearSpeed = maxLinearSpeed,
+            };
+        }
+    }
+
+    /// <summary>
+    /// Backward-compatible preset helper. New code should read settings via
+    /// <see cref="FramingSmoothingPresetCatalog"/>.
+    /// </summary>
     public static class FramingSmootherPresets
     {
         public static void Apply(FramingSmoother smoother, FramingSmoothingPreset preset)
         {
             if (smoother == null) return;
-            switch (preset)
-            {
-                case FramingSmoothingPreset.Tight:
-                    smoother.HorizontalMinCutoff = 2.0f;
-                    smoother.VerticalMinCutoff = 2.0f;
-                    smoother.HorizontalBeta = 0.02f;
-                    smoother.VerticalBeta = 0.02f;
-                    smoother.DeadZone = 0.002f;
-                    smoother.MaxLinearSpeed = float.PositiveInfinity;
-                    break;
-                case FramingSmoothingPreset.Documentary:
-                    smoother.HorizontalMinCutoff = 0.7f;
-                    smoother.VerticalMinCutoff = 0.7f;
-                    smoother.HorizontalBeta = 0.005f;
-                    smoother.VerticalBeta = 0.005f;
-                    smoother.DeadZone = 0.01f;
-                    smoother.MaxLinearSpeed = 30f;
-                    break;
-                case FramingSmoothingPreset.Cinematic:
-                    smoother.HorizontalMinCutoff = 0.3f;
-                    smoother.VerticalMinCutoff = 0.3f;
-                    smoother.HorizontalBeta = 0.003f;
-                    smoother.VerticalBeta = 0.003f;
-                    smoother.DeadZone = 0.02f;
-                    smoother.MaxLinearSpeed = 10f;
-                    break;
-                case FramingSmoothingPreset.Standard:
-                default:
-                    smoother.HorizontalMinCutoff = 1.0f;
-                    smoother.VerticalMinCutoff = 1.0f;
-                    smoother.HorizontalBeta = 0.007f;
-                    smoother.VerticalBeta = 0.007f;
-                    smoother.DeadZone = 0.005f;
-                    smoother.MaxLinearSpeed = 50f;
-                    break;
-            }
+            smoother.Settings = FramingSmoothingPresetCatalog.Get(preset);
         }
 
-        /// <summary>
-        /// Snapshot of preset values as a struct, for callers that want to apply them to
-        /// serialized fields directly (e.g. <see cref="SmoothedFramingFollower"/> Inspector
-        /// fields written via OnValidate).
-        /// </summary>
         public static PresetValues GetValues(FramingSmoothingPreset preset)
         {
-            switch (preset)
-            {
-                case FramingSmoothingPreset.Tight:
-                    return new PresetValues(2.0f, 2.0f, 0.02f, 0.02f, 0.002f, float.PositiveInfinity);
-                case FramingSmoothingPreset.Documentary:
-                    return new PresetValues(0.7f, 0.7f, 0.005f, 0.005f, 0.01f, 30f);
-                case FramingSmoothingPreset.Cinematic:
-                    return new PresetValues(0.3f, 0.3f, 0.003f, 0.003f, 0.02f, 10f);
-                case FramingSmoothingPreset.Standard:
-                default:
-                    return new PresetValues(1.0f, 1.0f, 0.007f, 0.007f, 0.005f, 50f);
-            }
+            return new PresetValues(FramingSmoothingPresetCatalog.Get(preset));
         }
 
         public readonly struct PresetValues
@@ -109,14 +102,14 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             public readonly float DeadZone;
             public readonly float MaxLinearSpeed;
 
-            public PresetValues(float hCutoff, float vCutoff, float hBeta, float vBeta, float deadZone, float maxSpeed)
+            public PresetValues(FramingSmoothingSettings settings)
             {
-                HorizontalMinCutoff = hCutoff;
-                VerticalMinCutoff = vCutoff;
-                HorizontalBeta = hBeta;
-                VerticalBeta = vBeta;
-                DeadZone = deadZone;
-                MaxLinearSpeed = maxSpeed;
+                HorizontalMinCutoff = settings.HorizontalMinCutoff;
+                VerticalMinCutoff = settings.VerticalMinCutoff;
+                HorizontalBeta = settings.HorizontalBeta;
+                VerticalBeta = settings.VerticalBeta;
+                DeadZone = settings.DeadZone;
+                MaxLinearSpeed = settings.MaxLinearSpeed <= 0f ? float.PositiveInfinity : settings.MaxLinearSpeed;
             }
         }
     }
