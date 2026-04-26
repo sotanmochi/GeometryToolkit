@@ -278,26 +278,24 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             }
         }
 
-        // Computed once per Tick.
+        // Computed once per Tick. Both raw and smoothed extent rects are derived from the same
+        // single vertex-projection pass under the smoothed camera, so they coincide exactly
+        // when raw offsets equal smoothed offsets (smoothing disabled or stationary subject).
         //
         //   raw extent (yellow): the subject's actual screen footprint under the smoothed
-        //     camera, computed by projecting every input vertex through the smoothed
-        //     view-projection matrix and taking the bounding rect. This is the exact answer
-        //     for "where the character is on screen right now" — it ignores any depth
-        //     approximation and matches the rendered character's pixel extents.
+        //     camera. Bounding rect of all vertices projected through the smoothed VP matrix.
+        //     Exact match for the rendered character's pixel extents.
         //
-        //   smoothed extent (green): the smoothing target rectangle — where the smoothing
-        //     system aims to fit the subject. Derived from the smoothed offsets: under the
-        //     smoothed camera at OBF-local (pr, pu, pf), an offset L for the left edge maps
-        //     to NDC x = (L - pr) / (kH * pf). For tight axes this collapses to the margin
-        //     by construction; for slack axes it shows the recentered position the smoother
-        //     resolved to. Symmetric for the other 3 edges.
+        //   smoothed extent (green): the same yellow rect, with each edge shifted by the
+        //     smoothing-induced offset delta (sm_X − raw_X). The shift is converted from
+        //     OBF-local meters to screen pixels using the actual depth (clip.w) of that edge's
+        //     extreme vertex — this preserves the perspective correction so the formula
+        //     reduces to (green = yellow) exactly when sm_X = raw_X for all 4 edges.
         //
-        // We can't use the offset → NDC formula for raw extents because raw offsets are not
-        // satisfied by the smoothed camera position — the touching plane projects to a slanted
-        // (depth-dependent) line under that camera, so any single-depth approximation (f=0 or
-        // otherwise) drifts visibly from the actual subject extents, especially when the subject
-        // has significant depth variation on the slack axis.
+        //     Derivation (left edge): pretend the leftmost extreme vertex P_left had offset
+        //     sm_L instead of raw_L while keeping its depth f(P_left). Its NDC x shifts by
+        //     (sm_L − raw_L) / (kH * (f(P_left) + pf_s)) = (sm_L − raw_L) / (kH * cw_at_left),
+        //     i.e. (sm_L − raw_L) * halfW / (kH * cw_at_left) in screen pixels.
         private void UpdateScreenFrameCache(ScreenMargin margin, int width, int height)
         {
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(width, height);
@@ -307,65 +305,46 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             _cachedRawExtentValid = false;
             if (_autoFramingCamera == null || _smoother == null || !_smoother.HasLastFrame) return;
 
-            // Raw extent: project the subject vertices through a smoothed-camera VP matrix
-            // built from the smoother's recorded LastSmoothedPosition (matches the camera
-            // position we just applied, independent of any Unity transform-cache state).
             var verts = _autoFramingCamera.WorldVertices;
-            if (verts.IsCreated && verts.Length > 0)
-            {
-                Matrix4x4 smoothedW2C = ComputeWorldToCameraMatrix(_smoother.LastSmoothedPosition, _camera.transform);
-                Matrix4x4 smoothedVP = _camera.projectionMatrix * smoothedW2C;
-                if (TryComputeProjectedRect(verts, smoothedVP, width, height, out _cachedRawExtentRect))
-                {
-                    _cachedRawExtentValid = true;
-                }
-            }
+            if (!verts.IsCreated || verts.Length == 0) return;
 
-            // Smoothed extent: closed-form smoothing target derived from smoothed offsets.
-            var obf = _autoFramingCamera.BoundingFrustum;
-            if (obf.PointCount > 0)
+            Matrix4x4 smoothedW2C = ComputeWorldToCameraMatrix(_smoother.LastSmoothedPosition, _camera.transform);
+            Matrix4x4 smoothedVP = _camera.projectionMatrix * smoothedW2C;
+            float fovYRad = _camera.fieldOfView * Mathf.Deg2Rad;
+            float kV = Mathf.Tan(fovYRad * 0.5f);
+            float kH = kV * _camera.aspect;
+
+            if (TryComputeRawAndSmoothedRects(
+                    verts, smoothedVP, width, height, kH, kV,
+                    _smoother.LastRawOffsets, _smoother.LastSmoothedOffsets,
+                    out _cachedRawExtentRect, out _cachedSmoothedExtentRect))
             {
-                Vector3 toRef = _smoother.LastSmoothedPosition - obf.ReferencePoint;
-                float pr = Vector3.Dot(obf.Right, toRef);
-                float pu = Vector3.Dot(obf.Up, toRef);
-                float pf = -Vector3.Dot(obf.Forward, toRef);
-                if (pf > 0f)
-                {
-                    float fovYRad = _camera.fieldOfView * Mathf.Deg2Rad;
-                    float kV = Mathf.Tan(fovYRad * 0.5f);
-                    float kH = kV * _camera.aspect;
-                    _cachedSmoothedExtentRect = OffsetsToGuiRect(
-                        _smoother.LastSmoothedOffsets, pr, pu, pf, kH, kV, width, height);
-                    _cachedSmoothedExtentValid = true;
-                }
+                _cachedRawExtentValid = true;
+                _cachedSmoothedExtentValid = true;
             }
         }
 
-        private static Rect OffsetsToGuiRect(
-            (float left, float right, float bottom, float top) offsets,
-            float pr, float pu, float pf, float kH, float kV,
-            int width, int height)
-        {
-            float invKHPF = 1f / (kH * pf);
-            float invKVPF = 1f / (kV * pf);
-            float ndcLeft = (offsets.left - pr) * invKHPF;
-            float ndcRight = (offsets.right - pr) * invKHPF;
-            float ndcBottom = (offsets.bottom - pu) * invKVPF;
-            float ndcTop = (offsets.top - pu) * invKVPF;
-            return NdcToGuiRect(ndcLeft, ndcRight, ndcBottom, ndcTop, width, height);
-        }
-
-        // Project all valid vertices through `vp` and return their screen-space bounding rect
-        // (in GUI coords — y from top). Direct 4x4 matrix multiplication beats Camera.WorldToScreenPoint
-        // by 3-5x for high-vertex SkinnedMesh targets.
-        private static bool TryComputeProjectedRect(NativeArray<Vector3> verts, Matrix4x4 vp,
-                                                   int width, int height, out Rect rect)
+        // Single vertex-projection pass that returns both the raw bounding rect (= yellow)
+        // and the smoothed-offset-shifted rect (= green). Tracking the per-edge clip.w lets
+        // green inherit yellow's exact depth-aware screen position and shift only by the
+        // smoothing-introduced offset delta — guaranteeing green == yellow when sm == raw.
+        private static bool TryComputeRawAndSmoothedRects(
+            NativeArray<Vector3> verts, Matrix4x4 vp,
+            int width, int height, float kH, float kV,
+            (float left, float right, float bottom, float top) raw,
+            (float left, float right, float bottom, float top) smoothed,
+            out Rect rawRect, out Rect smoothedRect)
         {
             float halfW = width * 0.5f;
             float halfH = height * 0.5f;
 
             float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
             float minY = float.PositiveInfinity, maxY = float.NegativeInfinity;
+            // clip.w of the vertex that contributed to each extreme — used to perspective-
+            // correct the smoothing-delta shift below. Initialized to 1 only as a defensive
+            // value; they are overwritten the first time a valid vertex updates the extreme.
+            float cwAtMinX = 1f, cwAtMaxX = 1f, cwAtMinY = 1f, cwAtMaxY = 1f;
+
             int validCount = 0;
             int count = verts.Length;
             for (int i = 0; i < count; i++)
@@ -378,15 +357,28 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 float invW = 1f / cw;
                 float sx = (cx * invW + 1f) * halfW;
                 float sy = (cy * invW + 1f) * halfH;
-                if (sx < minX) minX = sx;
-                if (sx > maxX) maxX = sx;
-                if (sy < minY) minY = sy;
-                if (sy > maxY) maxY = sy;
+                if (sx < minX) { minX = sx; cwAtMinX = cw; }
+                if (sx > maxX) { maxX = sx; cwAtMaxX = cw; }
+                if (sy < minY) { minY = sy; cwAtMinY = cw; }
+                if (sy > maxY) { maxY = sy; cwAtMaxY = cw; }
                 validCount++;
             }
-            if (validCount == 0) { rect = default; return false; }
-            // Flip y for GUI coords (y from top).
-            rect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
+            if (validCount == 0) { rawRect = default; smoothedRect = default; return false; }
+
+            // Yellow — flip y for GUI coords (y from top).
+            rawRect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
+
+            // Green — yellow + per-edge perspective-corrected shift. Δ = 0 ⇒ green == yellow.
+            float deltaLeft = (smoothed.left - raw.left) * halfW / (kH * cwAtMinX);
+            float deltaRight = (smoothed.right - raw.right) * halfW / (kH * cwAtMaxX);
+            float deltaBottom = (smoothed.bottom - raw.bottom) * halfH / (kV * cwAtMinY);
+            float deltaTop = (smoothed.top - raw.top) * halfH / (kV * cwAtMaxY);
+
+            float smMinX = minX + deltaLeft;
+            float smMaxX = maxX + deltaRight;
+            float smMinY = minY + deltaBottom;
+            float smMaxY = maxY + deltaTop;
+            smoothedRect = new Rect(smMinX, height - smMaxY, smMaxX - smMinX, smMaxY - smMinY);
             return true;
         }
 
