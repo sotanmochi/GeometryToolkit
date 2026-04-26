@@ -22,6 +22,10 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField] private List<Renderer> _targets = new();
         [SerializeField, Range(0f, 40f)] private float _marginPercent = 10f;
 
+        [Header("Smoothing")]
+        [SerializeField, Tooltip("Master switch. When off, the One-Euro filter and the dead-zone / max-speed clamps are bypassed: smoothed values match raw values, and the camera tracks the unfiltered framing target each frame. Useful for verifying the visualization baseline.")]
+        private bool _smoothingEnabled = true;
+
         [Header("Preset")]
         [SerializeField, Tooltip("Selecting a preset writes its values into the One-Euro / Output Clamps fields below. Tweak afterward to fine-tune.")]
         private FramingSmoothingPreset _preset = FramingSmoothingPreset.Standard;
@@ -170,6 +174,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             if (_autoFramingCamera == null || _smoother == null) return;
             if (_camera == null || _targets == null || _targets.Count == 0) return;
 
+            _smoother.Enabled = _smoothingEnabled;
             _smoother.HorizontalMinCutoff = _horizontalMinCutoff;
             _smoother.HorizontalBeta = _horizontalBeta;
             _smoother.VerticalMinCutoff = _verticalMinCutoff;

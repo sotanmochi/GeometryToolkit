@@ -25,6 +25,15 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         private readonly OneEuroFilter _bottomFilter = new();
         private readonly OneEuroFilter _topFilter = new();
 
+        /// <summary>
+        /// Master switch. When false, the One-Euro filters and the dead-zone / max-speed clamps
+        /// are bypassed: smoothed offsets equal raw offsets and the smoothed camera position
+        /// equals the raw one. Use for debugging to verify the visualization matches the
+        /// unfiltered baseline. The internal filter state is reset while disabled so the next
+        /// re-enabled frame initializes cleanly from the current input.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
         /// <summary>One-Euro minimum cutoff (Hz) applied to left / right offsets.</summary>
         public float HorizontalMinCutoff { get; set; } = 1f;
 
@@ -111,10 +120,27 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             var raw = autoFramingCamera.ComputeFrustumPlaneOffsets(
                 camera, renderers, margin, screenWidth, screenHeight);
 
-            float sLeft = _leftFilter.Filter(raw.left, dt);
-            float sRight = _rightFilter.Filter(raw.right, dt);
-            float sBottom = _bottomFilter.Filter(raw.bottom, dt);
-            float sTop = _topFilter.Filter(raw.top, dt);
+            float sLeft, sRight, sBottom, sTop;
+            if (Enabled)
+            {
+                sLeft = _leftFilter.Filter(raw.left, dt);
+                sRight = _rightFilter.Filter(raw.right, dt);
+                sBottom = _bottomFilter.Filter(raw.bottom, dt);
+                sTop = _topFilter.Filter(raw.top, dt);
+            }
+            else
+            {
+                // Bypass smoothing entirely. Reset filter state so the next Enabled frame
+                // re-initializes from the current input rather than carrying stale prev-values.
+                _leftFilter.Reset();
+                _rightFilter.Reset();
+                _bottomFilter.Reset();
+                _topFilter.Reset();
+                sLeft = raw.left;
+                sRight = raw.right;
+                sBottom = raw.bottom;
+                sTop = raw.top;
+            }
 
             // Recompose the raw (unsmoothed) position too — used by debug visualization to
             // show "what the camera would do without smoothing". The OBF basis state is the
@@ -128,7 +154,9 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
             bool deadZoneHit = false;
             bool maxSpeedHit = false;
-            if (_hasPreviousPosition)
+            // Output clamps only meaningful when smoothing is enabled — when disabled we want
+            // raw == smoothed end-to-end so the visualization can verify the baseline.
+            if (Enabled && _hasPreviousPosition)
             {
                 target = ApplyMaxSpeedClamp(target, dt, out maxSpeedHit);
                 target = ApplyDeadZone(target, out deadZoneHit);
