@@ -34,7 +34,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 $"  delta L/R/B/T:  {smoothed.Left - raw.Left,+7:F4} / {smoothed.Right - raw.Right,+7:F4} / {smoothed.Bottom - raw.Bottom,+7:F4} / {smoothed.Top - raw.Top,+7:F4}\n" +
                 $"raw      pos:  ({rawPosition.x,7:F3}, {rawPosition.y,7:F3}, {rawPosition.z,7:F3})\n" +
                 $"smoothed pos:  ({smoothedPosition.x,7:F3}, {smoothedPosition.y,7:F3}, {smoothedPosition.z,7:F3})    Δ = {positionDelta,6:F4} m\n" +
-                $"DeadZone hit:  {smoother.LastDeadZoneHit}    MaxSpeed clamp hit: {smoother.LastMaxSpeedHit}\n" +
                 frameInfo;
 
             const int padding = 8;

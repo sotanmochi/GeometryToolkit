@@ -26,7 +26,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField] private FramingSmoothingSettings _smoothingSettings = FramingSmoothingSettings.CreateDefault();
 
         [Header("Preset")]
-        [SerializeField, Tooltip("Selecting a preset writes its values into the One-Euro / Output Clamps fields below. Tweak afterward to fine-tune.")]
+        [SerializeField, Tooltip("Selecting a preset writes its values into the smoothing settings below. Tweak afterward to fine-tune.")]
         private FramingSmoothingPreset _preset = FramingSmoothingPreset.Standard;
 
         [Header("Update")]
@@ -37,7 +37,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [SerializeField] private ComputeShader _computeShader;
 
         [Header("Debug Visualization")]
-        [SerializeField, Tooltip("Show numeric overlay of raw / smoothed offsets and clamp state in the Game view.")]
+        [SerializeField, Tooltip("Show numeric overlay of raw / smoothed offsets in the Game view.")]
         private bool _showOnGuiOverlay = false;
 
         [SerializeField, Tooltip("Draw the screen-space margin rectangle (white) and the actual subject bounding rectangle (yellow) in the Game view. Lets you see whether smoothing causes the subject to leak outside the requested margin.")]
@@ -75,7 +75,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         }
 
         /// <summary>
-        /// Apply a parameter preset to the One-Euro / Output Clamps fields. Equivalent to
+        /// Apply a parameter preset to the smoothing settings. Equivalent to
         /// selecting the preset in the Inspector dropdown.
         /// </summary>
         public void ApplyPreset(FramingSmoothingPreset preset)
@@ -142,8 +142,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 rawOffsets,
                 smoothedOffsets,
                 rawPosition,
-                smoothedPosition,
-                dt);
+                smoothedPosition);
             _camera.transform.position = result.SmoothedPosition;
 
             if (_showSceneTrail)

@@ -24,67 +24,39 @@ namespace GeometryToolkit.CameraFraming.Smoothing.Tests
         }
 
         [Test]
-        public void FinalizeFrame_HoldsPreviousPosition_WhenInsideDeadZone()
+        public void FinalizeFrame_ReturnsSmoothedPositionUnchanged()
         {
-            var smoother = new FramingSmoother
-            {
-                Settings = new FramingSmoothingSettings
-                {
-                    Enabled = true,
-                    HorizontalMinCutoff = 1f,
-                    VerticalMinCutoff = 1f,
-                    HorizontalBeta = 0.007f,
-                    VerticalBeta = 0.007f,
-                    DerivativeCutoff = 1f,
-                    DeadZone = 0.5f,
-                    MaxLinearSpeed = 0f,
-                }
-            };
-
-            var offsets = new FramingOffsets(0f, 0f, 0f, 0f);
-            smoother.FinalizeFrame(offsets, offsets, Vector3.zero, new Vector3(1f, 0f, 0f), 1f / 60f);
+            var smoother = new FramingSmoother();
+            var rawOffsets = new FramingOffsets(0f, 1f, 2f, 3f);
+            var smoothedOffsets = new FramingOffsets(4f, 5f, 6f, 7f);
+            Vector3 rawPosition = new(1f, 2f, 3f);
+            Vector3 smoothedPosition = new(4f, 5f, 6f);
 
             FramingSmoothingResult result = smoother.FinalizeFrame(
-                offsets,
-                offsets,
-                new Vector3(1.1f, 0f, 0f),
-                new Vector3(1.1f, 0f, 0f),
-                1f / 60f);
+                rawOffsets,
+                smoothedOffsets,
+                rawPosition,
+                smoothedPosition);
 
-            Assert.AreEqual(new Vector3(1f, 0f, 0f), result.SmoothedPosition);
-            Assert.IsTrue(result.DeadZoneHit);
+            Assert.AreEqual(rawOffsets, result.RawOffsets);
+            Assert.AreEqual(smoothedOffsets, result.SmoothedOffsets);
+            Assert.AreEqual(rawPosition, result.RawPosition);
+            Assert.AreEqual(smoothedPosition, result.SmoothedPosition);
+            Assert.AreEqual(smoothedPosition, smoother.LastSmoothedPosition);
+            Assert.IsTrue(smoother.HasLastFrame);
         }
 
         [Test]
-        public void FinalizeFrame_ClampsDistance_WhenMaxSpeedIsExceeded()
+        public void Reset_ClearsLastFrameState()
         {
-            var smoother = new FramingSmoother
-            {
-                Settings = new FramingSmoothingSettings
-                {
-                    Enabled = true,
-                    HorizontalMinCutoff = 1f,
-                    VerticalMinCutoff = 1f,
-                    HorizontalBeta = 0.007f,
-                    VerticalBeta = 0.007f,
-                    DerivativeCutoff = 1f,
-                    DeadZone = 0f,
-                    MaxLinearSpeed = 2f,
-                }
-            };
-
+            var smoother = new FramingSmoother();
             var offsets = new FramingOffsets(0f, 0f, 0f, 0f);
-            smoother.FinalizeFrame(offsets, offsets, Vector3.zero, Vector3.zero, 1f);
+            smoother.FinalizeFrame(offsets, offsets, Vector3.zero, Vector3.one);
+            smoother.Reset();
 
-            FramingSmoothingResult result = smoother.FinalizeFrame(
-                offsets,
-                offsets,
-                Vector3.zero,
-                new Vector3(10f, 0f, 0f),
-                0.5f);
-
-            Assert.AreEqual(new Vector3(1f, 0f, 0f), result.SmoothedPosition);
-            Assert.IsTrue(result.MaxSpeedHit);
+            Assert.IsFalse(smoother.HasLastFrame);
+            Assert.AreEqual(default(FramingOffsets), smoother.LastRawOffsets);
+            Assert.AreEqual(default(Vector3), smoother.LastSmoothedPosition);
         }
     }
 }

@@ -25,8 +25,8 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         Documentary,
 
         /// <summary>
-        /// Cinematic. Heavy smoothing with slow follow and a wide dead zone — produces a
-        /// "dolly on rails" feel where small subject movements are intentionally ignored.
+        /// Cinematic. Heavy smoothing with slow follow — produces a "dolly on rails" feel
+        /// where small subject movements are intentionally ignored.
         /// </summary>
         Cinematic,
     }
@@ -43,14 +43,14 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             switch (preset)
             {
                 case FramingSmoothingPreset.Tight:
-                    return CreateSettings(2.0f, 2.0f, 0.02f, 0.02f, 0.002f, 0f);
+                    return CreateSettings(2.0f, 2.0f, 0.02f, 0.02f);
                 case FramingSmoothingPreset.Documentary:
-                    return CreateSettings(0.7f, 0.7f, 0.005f, 0.005f, 0.01f, 30f);
+                    return CreateSettings(0.7f, 0.7f, 0.005f, 0.005f);
                 case FramingSmoothingPreset.Cinematic:
-                    return CreateSettings(0.3f, 0.3f, 0.003f, 0.003f, 0.02f, 10f);
+                    return CreateSettings(0.3f, 0.3f, 0.003f, 0.003f);
                 case FramingSmoothingPreset.Standard:
                 default:
-                    return CreateSettings(1.0f, 1.0f, 0.007f, 0.007f, 0.005f, 50f);
+                    return CreateSettings(1.0f, 1.0f, 0.007f, 0.007f);
             }
         }
 
@@ -58,9 +58,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             float horizontalMinCutoff,
             float verticalMinCutoff,
             float horizontalBeta,
-            float verticalBeta,
-            float deadZone,
-            float maxLinearSpeed)
+            float verticalBeta)
         {
             return new FramingSmoothingSettings
             {
@@ -70,8 +68,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 HorizontalBeta = horizontalBeta,
                 VerticalBeta = verticalBeta,
                 DerivativeCutoff = 1f,
-                DeadZone = deadZone,
-                MaxLinearSpeed = maxLinearSpeed,
             };
         }
     }
@@ -99,8 +95,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             public readonly float VerticalMinCutoff;
             public readonly float HorizontalBeta;
             public readonly float VerticalBeta;
-            public readonly float DeadZone;
-            public readonly float MaxLinearSpeed;
 
             public PresetValues(FramingSmoothingSettings settings)
             {
@@ -108,8 +102,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 VerticalMinCutoff = settings.VerticalMinCutoff;
                 HorizontalBeta = settings.HorizontalBeta;
                 VerticalBeta = settings.VerticalBeta;
-                DeadZone = settings.DeadZone;
-                MaxLinearSpeed = settings.MaxLinearSpeed <= 0f ? float.PositiveInfinity : settings.MaxLinearSpeed;
             }
         }
     }

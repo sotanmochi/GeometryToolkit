@@ -9,7 +9,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
     [Serializable]
     public struct FramingSmoothingSettings : IEquatable<FramingSmoothingSettings>
     {
-        [Tooltip("Master switch. When off, smoothing and output clamps are bypassed.")]
+        [Tooltip("Master switch. When off, smoothing is bypassed.")]
         public bool Enabled;
 
         [Min(0f)]
@@ -27,12 +27,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
         [HideInInspector]
         public float DerivativeCutoff;
 
-        [Min(0f), Tooltip("Hold previous position when target moves less than this distance (meters). 0 disables.")]
-        public float DeadZone;
-
-        [Min(0f), Tooltip("Maximum camera translation speed (m/s). 0 = unlimited.")]
-        public float MaxLinearSpeed;
-
         public static FramingSmoothingSettings CreateDefault()
         {
             return new FramingSmoothingSettings
@@ -43,8 +37,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 HorizontalBeta = 0.007f,
                 VerticalBeta = 0.007f,
                 DerivativeCutoff = 1f,
-                DeadZone = 0.005f,
-                MaxLinearSpeed = 50f,
             };
         }
 
@@ -54,9 +46,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             VerticalMinCutoff == other.VerticalMinCutoff &&
             HorizontalBeta == other.HorizontalBeta &&
             VerticalBeta == other.VerticalBeta &&
-            DerivativeCutoff == other.DerivativeCutoff &&
-            DeadZone == other.DeadZone &&
-            MaxLinearSpeed == other.MaxLinearSpeed;
+            DerivativeCutoff == other.DerivativeCutoff;
 
         public override bool Equals(object obj) => obj is FramingSmoothingSettings other && Equals(other);
 
@@ -66,8 +56,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             VerticalMinCutoff,
             HorizontalBeta,
             VerticalBeta,
-            DerivativeCutoff,
-            DeadZone,
-            MaxLinearSpeed);
+            DerivativeCutoff);
     }
 }

@@ -15,8 +15,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing.Tests
             Assert.AreEqual(0.007f, settings.HorizontalBeta);
             Assert.AreEqual(0.007f, settings.VerticalBeta);
             Assert.AreEqual(1f, settings.DerivativeCutoff);
-            Assert.AreEqual(0.005f, settings.DeadZone);
-            Assert.AreEqual(50f, settings.MaxLinearSpeed);
         }
 
         [Test]
@@ -29,8 +27,6 @@ namespace GeometryToolkit.CameraFraming.Smoothing.Tests
             Assert.AreEqual(settings.VerticalMinCutoff, values.VerticalMinCutoff);
             Assert.AreEqual(settings.HorizontalBeta, values.HorizontalBeta);
             Assert.AreEqual(settings.VerticalBeta, values.VerticalBeta);
-            Assert.AreEqual(settings.DeadZone, values.DeadZone);
-            Assert.AreEqual(settings.MaxLinearSpeed, values.MaxLinearSpeed);
         }
     }
 }
