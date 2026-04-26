@@ -139,6 +139,27 @@ namespace GeometryToolkit.CameraFraming
         }
 
         /// <summary>
+        /// Recompose the camera world position from arbitrary frustum-plane offsets, using the
+        /// currently cached <see cref="BoundingFrustum"/> basis (built by a prior
+        /// <see cref="BuildBoundingFrustum"/> / <see cref="ComputeFrustumPlaneOffsets"/> call).
+        /// Pass smoothed or otherwise post-processed offsets here to obtain the corresponding
+        /// camera position via the same closed-form formulas used by
+        /// <see cref="ComputeCameraPosition(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>.
+        /// </summary>
+        public Vector3 RecomposeCameraPosition(
+            Camera camera,
+            float left, float right, float bottom, float top,
+            ScreenMargin margin,
+            int screenWidth,
+            int screenHeight)
+        {
+            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
+            // return RecomposeFromOffsets(in p, p.left, p.right, p.bottom, p.top); // WIP
+            return RecomposeFromOffsets(in p, left, right, bottom, top);
+        }
+
+        /// <summary>
         /// Build the internal <see cref="BoundingFrustum"/> from the given renderers, using the
         /// configured <see cref="IMeshVertexCollector"/>. The bounding frustum is then available
         /// via <see cref="BoundingFrustum"/> for subsequent offset / position queries.
@@ -187,31 +208,36 @@ namespace GeometryToolkit.CameraFraming
                 p.nLeft, p.nRight, p.nBottom, p.nTop, p.kHorizontal, p.kVertical);
         }
 
-        /// <summary>
-        /// Recompose the camera world position from arbitrary frustum-plane offsets, using the
-        /// currently cached <see cref="BoundingFrustum"/> basis (built by a prior
-        /// <see cref="BuildBoundingFrustum"/> / <see cref="ComputeFrustumPlaneOffsets"/> call).
-        /// Pass smoothed or otherwise post-processed offsets here to obtain the corresponding
-        /// camera position via the same closed-form formulas used by
-        /// <see cref="ComputeCameraPosition(Camera, IReadOnlyList{Renderer}, ScreenMargin, int, int)"/>.
-        /// </summary>
-        public Vector3 RecomposeCameraPosition(
-            Camera camera,
-            float left, float right, float bottom, float top,
-            ScreenMargin margin,
-            int screenWidth,
-            int screenHeight)
-        {
-            if (camera == null) throw new ArgumentNullException(nameof(camera));
-            var p = ComputeProjectionParameters(camera, margin, screenWidth, screenHeight);
-            return RecomposeFromOffsets(in p, left, right, bottom, top);
-        }
-
         private void EnsureWorldVertexBufferCapacity(int requiredCapacity)
         {
             if (_worldVertexBuffer.IsCreated && _worldVertexBuffer.Length >= requiredCapacity) return;
             if (_worldVertexBuffer.IsCreated) _worldVertexBuffer.Dispose();
             _worldVertexBuffer = new NativeArray<Vector3>(requiredCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+        }
+
+        private static ProjectionParameters ComputeProjectionParameters(
+            Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
+        {
+            var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(screenWidth, screenHeight);
+            float horizontalSpan = nRight - nLeft;
+            float verticalSpan = nTop - nBottom;
+            const float MinSpan = 1e-4f;
+            if (horizontalSpan < MinSpan || verticalSpan < MinSpan)
+            {
+                throw new ArgumentException(
+                    "ScreenMargin leaves no usable area; (nRight - nLeft) and (nTop - nBottom) must be positive.");
+            }
+
+            float fovYRad = camera.fieldOfView * Mathf.Deg2Rad;
+            float kVertical = Mathf.Tan(fovYRad * 0.5f);
+            float kHorizontal = kVertical * camera.aspect;
+
+            return new ProjectionParameters
+            {
+                nLeft = nLeft, nRight = nRight, nBottom = nBottom, nTop = nTop,
+                kHorizontal = kHorizontal, kVertical = kVertical,
+                horizontalSpan = horizontalSpan, verticalSpan = verticalSpan,
+            };
         }
 
         // Closed-form depth per axis (see ObjectBoundingFrustum.ComputeFrustumPlaneOffsets remarks
@@ -243,31 +269,6 @@ namespace GeometryToolkit.CameraFraming
                    + _boundingFrustum.Right * pr
                    + _boundingFrustum.Up * pu
                    - _boundingFrustum.Forward * pf;
-        }
-
-        private static ProjectionParameters ComputeProjectionParameters(
-            Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
-        {
-            var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(screenWidth, screenHeight);
-            float horizontalSpan = nRight - nLeft;
-            float verticalSpan = nTop - nBottom;
-            const float MinSpan = 1e-4f;
-            if (horizontalSpan < MinSpan || verticalSpan < MinSpan)
-            {
-                throw new ArgumentException(
-                    "ScreenMargin leaves no usable area; (nRight - nLeft) and (nTop - nBottom) must be positive.");
-            }
-
-            float fovYRad = camera.fieldOfView * Mathf.Deg2Rad;
-            float kVertical = Mathf.Tan(fovYRad * 0.5f);
-            float kHorizontal = kVertical * camera.aspect;
-
-            return new ProjectionParameters
-            {
-                nLeft = nLeft, nRight = nRight, nBottom = nBottom, nTop = nTop,
-                kHorizontal = kHorizontal, kVertical = kVertical,
-                horizontalSpan = horizontalSpan, verticalSpan = verticalSpan,
-            };
         }
 
         private struct ProjectionParameters

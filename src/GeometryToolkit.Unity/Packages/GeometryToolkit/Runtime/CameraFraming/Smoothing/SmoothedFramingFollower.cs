@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Unity.Collections;
 using UnityEngine;
 
 namespace GeometryToolkit.CameraFraming.Smoothing
@@ -165,6 +164,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             if (_updateTiming == UpdateTiming.FixedUpdate) Tick(Time.fixedDeltaTime);
         }
 
+        // REVIEWING
         private void Tick(float dt)
         {
             if (_autoFramingCamera == null || _smoother == null) return;
@@ -185,6 +185,7 @@ namespace GeometryToolkit.CameraFraming.Smoothing
                 _autoFramingCamera, _camera, _targets, margin, width, height, dt);
             _camera.transform.position = smoothedPosition;
 
+            // DEBUGGING
             if (_showSceneTrail) PushTrailSample(_smoother.LastRawPosition, smoothedPosition);
             if (_showScreenFrame) UpdateScreenFrameCache(margin, width, height);
         }
@@ -255,9 +256,11 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             GUI.Box(rect, text, style);
         }
 
+        // DEBUGGING
         private void DrawCachedScreenFrames()
         {
-            DrawGuiRectBorder(_cachedMarginRect, new Color(1f, 1f, 1f, 0.7f), 2f);
+            // DrawGuiRectBorder(_cachedMarginRect, new Color(1f, 1f, 1f, 0.7f), 2f);
+            DrawGuiRectBorder(_cachedMarginRect, new Color(1f, 0f, 0f, 0.7f), 2f);
             // Match the camera-trail color scheme: yellow = filter-off (raw), green = filter-on (smoothed).
             if (_cachedRawExtentValid)
             {
@@ -269,19 +272,20 @@ namespace GeometryToolkit.CameraFraming.Smoothing
             }
         }
 
-        // Computed once per Tick. The per-vertex projection uses the view-projection matrix
-        // multiplied directly (no Camera.WorldToScreenPoint per call) — this is ~3-5x faster
-        // for high-vertex SkinnedMesh targets, since we skip the per-call method dispatch and
-        // viewport-rect handling in WorldToScreenPoint.
+        // Computed once per Tick. Maps the four offset scalars (in OBF local r/u/f frame) to
+        // screen NDC under the current — smoothed — camera. Both raw and smoothed offsets
+        // share the same camera matrix; only the offset values differ.
         //
-        // Two extents are computed each Tick:
-        //   - smoothed extent: subject vertices projected via the actual (smoothed) camera matrix.
-        //     Drifts away from the margin as smoothing causes lag — this is "where the subject
-        //     actually appears on screen now".
-        //   - raw extent: subject vertices projected via a virtual camera at LastRawPosition
-        //     (same orientation / projection as the actual camera). By construction this matches
-        //     the margin frame exactly — it's the "filter-off baseline", mirroring the raw
-        //     camera-position trail.
+        //   raw offsets (filter-off): subject's actual extreme planes for this frame's vertices
+        //     → under smoothed camera, their NDC positions deviate from the margin by exactly
+        //       the smoothing lag. This is the "drifting" rectangle.
+        //   smoothed offsets (filter-on): the smoothing target — the offset values the camera
+        //     position was solved for. By construction they project to the margin under the
+        //     smoothed camera (with horizontal/vertical recentering when one axis is slack).
+        //
+        // The math: under camera at OBF-local (pr, pu, pf), an offset L for the left edge maps
+        // to NDC x = (L - pr) / (kH * pf). Symmetric for the other 3 edges. Derived from the
+        // touching-plane equation evaluated at the OBF reference depth (f = 0).
         private void UpdateScreenFrameCache(ScreenMargin margin, int width, int height)
         {
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(width, height);
@@ -289,75 +293,42 @@ namespace GeometryToolkit.CameraFraming.Smoothing
 
             _cachedSmoothedExtentValid = false;
             _cachedRawExtentValid = false;
-            if (_autoFramingCamera == null) return;
-            var verts = _autoFramingCamera.WorldVertices;
-            if (!verts.IsCreated || verts.Length == 0) return;
-            if (_smoother == null || !_smoother.HasLastFrame) return;
+            if (_autoFramingCamera == null || _smoother == null || !_smoother.HasLastFrame) return;
 
-            // Build both view-projection matrices via the same helper to keep the math
-            // symmetric — avoids any divergence between Unity's internal worldToCameraMatrix
-            // caching state and the custom matrix we use for the raw position.
-            Matrix4x4 smoothedW2C = ComputeWorldToCameraMatrix(_smoother.LastSmoothedPosition, _camera.transform);
-            Matrix4x4 smoothedVP = _camera.projectionMatrix * smoothedW2C;
-            if (TryComputeProjectedRect(verts, smoothedVP, width, height, out _cachedSmoothedExtentRect))
-            {
-                _cachedSmoothedExtentValid = true;
-            }
+            var obf = _autoFramingCamera.BoundingFrustum;
+            if (obf.PointCount == 0) return;
 
-            Matrix4x4 rawW2C = ComputeWorldToCameraMatrix(_smoother.LastRawPosition, _camera.transform);
-            Matrix4x4 rawVP = _camera.projectionMatrix * rawW2C;
-            if (TryComputeProjectedRect(verts, rawVP, width, height, out _cachedRawExtentRect))
-            {
-                _cachedRawExtentValid = true;
-            }
+            // Recover the smoothed camera position (pr, pu, pf) in the OBF local frame.
+            // Camera world position = ReferencePoint + R*pr + U*pu - F*pf.
+            Vector3 toRef = _smoother.LastSmoothedPosition - obf.ReferencePoint;
+            float pr = Vector3.Dot(obf.Right, toRef);
+            float pu = Vector3.Dot(obf.Up, toRef);
+            float pf = -Vector3.Dot(obf.Forward, toRef);
+            if (pf <= 0f) return;  // camera not in front of reference point; visualization undefined
+
+            float fovYRad = _camera.fieldOfView * Mathf.Deg2Rad;
+            float kV = Mathf.Tan(fovYRad * 0.5f);
+            float kH = kV * _camera.aspect;
+
+            _cachedRawExtentRect = OffsetsToGuiRect(_smoother.LastRawOffsets, pr, pu, pf, kH, kV, width, height);
+            _cachedRawExtentValid = true;
+
+            _cachedSmoothedExtentRect = OffsetsToGuiRect(_smoother.LastSmoothedOffsets, pr, pu, pf, kH, kV, width, height);
+            _cachedSmoothedExtentValid = true;
         }
 
-        private static bool TryComputeProjectedRect(NativeArray<Vector3> verts, Matrix4x4 vp,
-                                                   int width, int height, out Rect rect)
+        private static Rect OffsetsToGuiRect(
+            (float left, float right, float bottom, float top) offsets,
+            float pr, float pu, float pf, float kH, float kV,
+            int width, int height)
         {
-            float halfW = width * 0.5f;
-            float halfH = height * 0.5f;
-
-            float minX = float.PositiveInfinity, maxX = float.NegativeInfinity;
-            float minY = float.PositiveInfinity, maxY = float.NegativeInfinity;
-            int validCount = 0;
-            int count = verts.Length;
-            for (int i = 0; i < count; i++)
-            {
-                Vector3 v = verts[i];
-                float cw = vp.m30 * v.x + vp.m31 * v.y + vp.m32 * v.z + vp.m33;
-                if (cw <= 0f) continue;  // behind camera
-                float cx = vp.m00 * v.x + vp.m01 * v.y + vp.m02 * v.z + vp.m03;
-                float cy = vp.m10 * v.x + vp.m11 * v.y + vp.m12 * v.z + vp.m13;
-                float invW = 1f / cw;
-                float sx = (cx * invW + 1f) * halfW;
-                float sy = (cy * invW + 1f) * halfH;
-                if (sx < minX) minX = sx;
-                if (sx > maxX) maxX = sx;
-                if (sy < minY) minY = sy;
-                if (sy > maxY) maxY = sy;
-                validCount++;
-            }
-            if (validCount == 0) { rect = default; return false; }
-
-            // Flip y for GUI coords (y from top).
-            rect = new Rect(minX, height - maxY, maxX - minX, maxY - minY);
-            return true;
-        }
-
-        // Build a worldToCameraMatrix as Unity does (OpenGL convention — camera looks down -Z in
-        // camera space) for an arbitrary position with the supplied transform's orientation.
-        // Avoids mutating the live Transform just to read the matrix.
-        private static Matrix4x4 ComputeWorldToCameraMatrix(Vector3 pos, Transform t)
-        {
-            Vector3 r = t.right;
-            Vector3 u = t.up;
-            Vector3 f = t.forward;
-            Matrix4x4 m = Matrix4x4.identity;
-            m.m00 = r.x;  m.m01 = r.y;  m.m02 = r.z;  m.m03 = -Vector3.Dot(r, pos);
-            m.m10 = u.x;  m.m11 = u.y;  m.m12 = u.z;  m.m13 = -Vector3.Dot(u, pos);
-            m.m20 = -f.x; m.m21 = -f.y; m.m22 = -f.z; m.m23 = Vector3.Dot(f, pos);
-            return m;
+            float invKHPF = 1f / (kH * pf);
+            float invKVPF = 1f / (kV * pf);
+            float ndcLeft = (offsets.left - pr) * invKHPF;
+            float ndcRight = (offsets.right - pr) * invKHPF;
+            float ndcBottom = (offsets.bottom - pu) * invKVPF;
+            float ndcTop = (offsets.top - pu) * invKVPF;
+            return NdcToGuiRect(ndcLeft, ndcRight, ndcBottom, ndcTop, width, height);
         }
 
         private static Rect NdcToGuiRect(float nLeft, float nRight, float nBottom, float nTop,
