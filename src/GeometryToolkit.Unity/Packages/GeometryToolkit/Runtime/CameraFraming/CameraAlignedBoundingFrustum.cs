@@ -24,7 +24,7 @@ namespace GeometryToolkit.CameraFraming
     /// supplying world-space vertex positions. See <see cref="IMeshVertexCollector"/> for the
     /// standard collection strategies.
     /// </summary>
-    public sealed class ObjectBoundingFrustum : IDisposable
+    public sealed class CameraAlignedBoundingFrustum : IDisposable
     {
         private Vector3 _referencePoint;
         private Vector3 _right;
@@ -150,7 +150,7 @@ namespace GeometryToolkit.CameraFraming
             if (_projectedPoints.Length == 0)
             {
                 throw new InvalidOperationException(
-                    "ObjectBoundingFrustum has no points. Call Rebuild() with non-empty input first.");
+                    "CameraAlignedBoundingFrustum has no points. Call Rebuild() with non-empty input first.");
             }
 
             float left = float.PositiveInfinity;

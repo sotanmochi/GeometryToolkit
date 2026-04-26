@@ -9,7 +9,7 @@ namespace GeometryToolkit.CameraFraming
     /// Computes a camera world position that frames the given renderers within the requested
     /// screen-space margins, given a fixed camera orientation.
     ///
-    /// Algorithm: build an <see cref="ObjectBoundingFrustum"/> over the input vertices for the
+    /// Algorithm: build a <see cref="CameraAlignedBoundingFrustum"/> over the input vertices for the
     /// given camera orientation, evaluate the four frustum-plane offsets (one per Normalized
     /// Device Coordinates (NDC) edge) for the requested bounds, then compute the camera position
     /// directly from those offsets via fixed formulas (no iteration). One axis tightly fits the
@@ -22,12 +22,12 @@ namespace GeometryToolkit.CameraFraming
     /// </summary>
     public sealed class AutoFramingCamera : IDisposable
     {
-        private readonly ObjectBoundingFrustum _boundingFrustum = new();
+        private readonly CameraAlignedBoundingFrustum _boundingFrustum = new();
         private readonly IMeshVertexCollector _vertexCollector;
         private readonly bool _ownsVertexCollector;
         private NativeArray<Vector3> _worldVertexBuffer;
 
-        public ObjectBoundingFrustum BoundingFrustum => _boundingFrustum;
+        public CameraAlignedBoundingFrustum BoundingFrustum => _boundingFrustum;
         public IMeshVertexCollector VertexCollector => _vertexCollector;
 
         /// <summary>
@@ -118,7 +118,8 @@ namespace GeometryToolkit.CameraFraming
         }
 
         /// <summary>
-        /// Compute the camera position using a previously built <see cref="BoundingFrustum"/>.
+        /// Compute the camera position using a previously built
+        /// <see cref="CameraAlignedBoundingFrustum"/>.
         /// Useful when the bounding frustum is reused across multiple margin queries (e.g. when
         /// scrubbing through preset margins).
         /// </summary>
@@ -144,7 +145,7 @@ namespace GeometryToolkit.CameraFraming
             var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
                 nLeft, nRight, nBottom, nTop, kHorizontal, kVertical);
 
-            // Closed-form depth per axis (see ObjectBoundingFrustum.ComputeFrustumPlaneOffsets
+            // Closed-form depth per axis (see CameraAlignedBoundingFrustum.ComputeFrustumPlaneOffsets
             // remarks for the touching-plane equations).
             float pfHorizontal = (right - left) / (horizontalSpan * kHorizontal);
             float pfVertical = (top - bottom) / (verticalSpan * kVertical);
