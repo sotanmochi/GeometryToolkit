@@ -114,7 +114,7 @@ namespace GeometryToolkit.CameraFraming
 
             var t = camera.transform;
             _boundingFrustum.Rebuild(worldVertices, t.right, t.up, t.forward, referencePoint);
-            return ComputeCameraPositionFromBoundingFrustum(camera, margin, screenWidth, screenHeight);
+            return ComputeCameraPositionFromBoundingFrustum(screenWidth, screenHeight, camera.fieldOfView, margin);
         }
 
         /// <summary>
@@ -124,9 +124,16 @@ namespace GeometryToolkit.CameraFraming
         /// scrubbing through preset margins).
         /// </summary>
         public Vector3 ComputeCameraPositionFromBoundingFrustum(
-            Camera camera, ScreenMargin margin, int screenWidth, int screenHeight)
+            int screenWidth, int screenHeight, float verticalFieldOfView, ScreenMargin margin)
         {
-            if (camera == null) throw new ArgumentNullException(nameof(camera));
+            if (screenWidth <= 0) throw new ArgumentOutOfRangeException(nameof(screenWidth));
+            if (screenHeight <= 0) throw new ArgumentOutOfRangeException(nameof(screenHeight));
+            if (verticalFieldOfView <= 0f || verticalFieldOfView >= 180f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(verticalFieldOfView), verticalFieldOfView,
+                    "The value of vertical field of view (degrees) must be in the open range (0, 180).");
+            }
 
             var (nLeft, nRight, nBottom, nTop) = margin.ToNdcBounds(screenWidth, screenHeight);
             float horizontalSpan = nRight - nLeft;
@@ -138,9 +145,10 @@ namespace GeometryToolkit.CameraFraming
                     "ScreenMargin leaves no usable area; (nRight - nLeft) and (nTop - nBottom) must be positive.");
             }
 
-            float fovYRad = camera.fieldOfView * Mathf.Deg2Rad;
+            float fovYRad = verticalFieldOfView * Mathf.Deg2Rad;
             float kVertical = Mathf.Tan(fovYRad * 0.5f);
-            float kHorizontal = kVertical * camera.aspect;
+            float aspectRatio = screenWidth / (float) screenHeight;
+            float kHorizontal = kVertical * aspectRatio;
 
             var (left, right, bottom, top) = _boundingFrustum.ComputeFrustumPlaneOffsets(
                 nLeft, nRight, nBottom, nTop, kHorizontal, kVertical);
